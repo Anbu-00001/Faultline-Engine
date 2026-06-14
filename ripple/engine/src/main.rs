@@ -45,6 +45,7 @@ struct Impacted {
     id: String,
     name: String,
     file_path: String,
+    definition_type: String,
     distance: u32,
 }
 
@@ -100,6 +101,7 @@ fn analyze(graph: &Graph, changed: &[String]) -> Report {
                 id: n.id.clone(),
                 name: n.name.clone(),
                 file_path: n.file_path.clone(),
+                definition_type: n.definition_type.clone(),
                 distance: *d,
             })
         })
@@ -156,40 +158,39 @@ fn main() {
 mod tests {
     use super::*;
 
+    fn node(id: &str, name: &str, f: &str) -> Node {
+        Node { id: id.into(), name: name.into(), file_path: f.into(), definition_type: "Function".into() }
+    }
+    fn edge(from: &str, to: &str) -> Edge {
+        Edge { etype: "CALLS".into(), from: from.into(), to: to.into() }
+    }
+
     // Mirrors the verified ripple-demo-go calc graph:
-    //   TotalWithTax -> CalculateTax -> {applyRate, standardRate}
-    //   ApplyDiscount is isolated (uncalled).
+    //   TotalWithTax -> CalculateTax -> {applyRate, standardRate}; ApplyDiscount isolated.
     fn sample() -> Graph {
-        let n = |id: &str, name: &str, f: &str| Node {
-            id: id.into(),
-            name: name.into(),
-            file_path: f.into(),
-            definition_type: "Function".into(),
-        };
-        let e = |from: &str, to: &str| Edge {
-            etype: "CALLS".into(),
-            from: from.into(),
-            to: to.into(),
-        };
         Graph {
             nodes: vec![
-                n("A", "applyRate", "calc/tax.go"),
-                n("S", "standardRate", "calc/tax.go"),
-                n("C", "CalculateTax", "calc/tax.go"),
-                n("T", "TotalWithTax", "calc/order.go"),
-                n("D", "ApplyDiscount", "calc/tax.go"),
+                node("A", "applyRate", "calc/tax.go"),
+                node("S", "standardRate", "calc/tax.go"),
+                node("C", "CalculateTax", "calc/tax.go"),
+                node("T", "TotalWithTax", "calc/order.go"),
+                node("D", "ApplyDiscount", "calc/tax.go"),
             ],
-            edges: vec![e("T", "C"), e("C", "A"), e("C", "S")],
+            edges: vec![edge("T", "C"), edge("C", "A"), edge("C", "S")],
         }
     }
 
+    fn by_name(r: &Report) -> HashMap<String, u32> {
+        r.blast_radius.iter().map(|x| (x.name.clone(), x.distance)).collect()
+    }
+
     #[test]
-    fn blast_radius_of_applyrate_is_transitive() {
+    fn blast_radius_is_transitive() {
         let r = analyze(&sample(), &["A".to_string()]);
-        let names: HashSet<&str> = r.blast_radius.iter().map(|x| x.name.as_str()).collect();
-        assert!(names.contains("CalculateTax"), "direct caller missing");
-        assert!(names.contains("TotalWithTax"), "transitive caller missing");
+        let m = by_name(&r);
         assert_eq!(r.impacted_count, 2);
+        assert_eq!(m["CalculateTax"], 1);
+        assert_eq!(m["TotalWithTax"], 2);
         assert_eq!(r.max_depth, 2);
     }
 
@@ -201,11 +202,93 @@ mod tests {
     }
 
     #[test]
-    fn distances_are_shortest() {
-        let r = analyze(&sample(), &["A".to_string()]);
-        let by_name: HashMap<&str, u32> =
-            r.blast_radius.iter().map(|x| (x.name.as_str(), x.distance)).collect();
-        assert_eq!(by_name["CalculateTax"], 1);
-        assert_eq!(by_name["TotalWithTax"], 2);
+    fn cycle_terminates_and_is_correct() {
+        // a -> b -> c -> a (a calls b, b calls c, c calls a)
+        let g = Graph {
+            nodes: vec![node("A", "a", "f"), node("B", "b", "f"), node("C", "c", "f")],
+            edges: vec![edge("A", "B"), edge("B", "C"), edge("C", "A")],
+        };
+        let r = analyze(&g, &["A".to_string()]);
+        let m = by_name(&r);
+        assert_eq!(r.impacted_count, 2);
+        assert_eq!(m["c"], 1);
+        assert_eq!(m["b"], 2);
+    }
+
+    #[test]
+    fn self_loop_is_safe() {
+        let g = Graph { nodes: vec![node("A", "a", "f")], edges: vec![edge("A", "A")] };
+        let r = analyze(&g, &["A".to_string()]);
+        assert_eq!(r.impacted_count, 0);
+    }
+
+    #[test]
+    fn diamond_shared_caller_counted_once() {
+        // T->B, T->C, B->X, C->X ; change X
+        let g = Graph {
+            nodes: vec![node("X", "x", "f"), node("B", "b", "f"), node("C", "c", "f"), node("T", "t", "f")],
+            edges: vec![edge("B", "X"), edge("C", "X"), edge("T", "B"), edge("T", "C")],
+        };
+        let r = analyze(&g, &["X".to_string()]);
+        let m = by_name(&r);
+        assert_eq!(r.impacted_count, 3);
+        assert_eq!(m["b"], 1);
+        assert_eq!(m["c"], 1);
+        assert_eq!(m["t"], 2);
+    }
+
+    #[test]
+    fn deep_chain_beyond_three_hops() {
+        // L1->L0, L2->L1, ... L5->L4 ; change L0 => impacted at depths 1..=5
+        // (proves we exceed Orbit's hard 3-hop DSL cap — the core differentiator).
+        let mut nodes = Vec::new();
+        let mut edges = Vec::new();
+        for i in 0..6 {
+            nodes.push(node(&format!("L{i}"), &format!("l{i}"), "f"));
+        }
+        for i in 0..5 {
+            edges.push(edge(&format!("L{}", i + 1), &format!("L{i}")));
+        }
+        let g = Graph { nodes, edges };
+        let r = analyze(&g, &["L0".to_string()]);
+        assert_eq!(r.impacted_count, 5);
+        assert_eq!(r.max_depth, 5);
+    }
+
+    #[test]
+    fn multiple_changed_nodes_union_correctly() {
+        let r = analyze(&sample(), &["A".to_string(), "S".to_string()]);
+        assert_eq!(r.impacted_count, 2); // CalculateTax + TotalWithTax
+    }
+
+    #[test]
+    fn missing_changed_id_is_ignored() {
+        let r = analyze(&sample(), &["NOPE".to_string()]);
+        assert_eq!(r.impacted_count, 0);
+    }
+
+    #[test]
+    fn empty_changed_set_is_empty() {
+        let r = analyze(&sample(), &[]);
+        assert_eq!(r.impacted_count, 0);
+        assert_eq!(r.max_depth, 0);
+    }
+
+    #[test]
+    fn duplicate_edges_do_not_double_count() {
+        let mut g = sample();
+        g.edges.push(edge("C", "A"));
+        let r = analyze(&g, &["A".to_string()]);
+        assert_eq!(r.impacted_count, 2);
+    }
+
+    #[test]
+    fn output_is_deterministic_and_sorted() {
+        let names: Vec<String> = analyze(&sample(), &["A".to_string()])
+            .blast_radius
+            .iter()
+            .map(|x| x.name.clone())
+            .collect();
+        assert_eq!(names, vec!["CalculateTax".to_string(), "TotalWithTax".to_string()]);
     }
 }
