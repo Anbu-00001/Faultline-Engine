@@ -24,3 +24,10 @@ go.work.sum
 *.sw?
 .DS_Store
 Thumbs.db
+
+# Go build binaries
+ripple-agent
+
+# Rust build artifacts
+target/
+
