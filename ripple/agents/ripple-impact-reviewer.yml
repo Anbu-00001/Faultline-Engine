@@ -111,9 +111,9 @@ tools:
 public: false
 
 consumers:
-  - group_id: 134742282  # VERIFY: top-level group `anbuchelvanganesan.cse2024-group` numeric id
-    trigger_types:
-      - mention
-      - merge_request
+  # NOTE: trigger_types is FLOW-only and illegal on an agent consumer
+  # (catalog-sync schema is additionalProperties:false) — declarative agents
+  # carry no triggers; they're invoked via Duo chat / agent selection.
+  - group_id: 134742282  # top-level group anbuchelvanganesan.cse2024-group (verified via /groups lookup)
     projects:
-      - 83317688  # ripple-demo-go (project_id) — confirmed in build notes
+      - 83317688  # ripple-demo-go (project_id)
