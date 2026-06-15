@@ -62,7 +62,7 @@ func TestResolveChanged(t *testing.T) {
 }
 
 func TestRenderMarkdownEmptyBlastRadius(t *testing.T) {
-	md := renderMarkdown(report{ImpactedCount: 0}, []string{"ApplyDiscount"})
+	md := renderMarkdown(report{ImpactedCount: 0}, []string{"ApplyDiscount"}, nil)
 	if !strings.Contains(md, "Empty blast radius") {
 		t.Fatalf("empty radius should be called out, got:\n%s", md)
 	}
@@ -80,10 +80,10 @@ func TestRenderMarkdownDeepChainFlagsCap(t *testing.T) {
 		MaxDepth:      5,
 		BlastRadius: []impacted{
 			{Name: "CalculateTax", FilePath: "calc/tax.go", Distance: 1},
-			{ID: "999", FilePath: "calc/order.go", Distance: 5}, // no name -> falls back to ID
+			{ID: "999", FilePath: "calc/order.go", Distance: 5}, // no name -> labeled unresolved
 		},
 	}
-	md := renderMarkdown(r, []string{"applyRate"})
+	md := renderMarkdown(r, []string{"applyRate"}, nil)
 	if !strings.Contains(md, "2 definition(s) transitively affected") {
 		t.Fatalf("missing impact count, got:\n%s", md)
 	}
@@ -93,14 +93,113 @@ func TestRenderMarkdownDeepChainFlagsCap(t *testing.T) {
 	if !strings.Contains(md, "| `CalculateTax` | calc/tax.go | 1 |") {
 		t.Fatalf("table row malformed, got:\n%s", md)
 	}
-	if !strings.Contains(md, "| `999` |") {
-		t.Fatalf("nameless impacted node should fall back to ID, got:\n%s", md)
+	if !strings.Contains(md, "| `(unresolved #999)` | calc/order.go | 5 |") {
+		t.Fatalf("nameless impacted node should be labeled (unresolved #id), got:\n%s", md)
+	}
+}
+
+func TestRenderMarkdownEscapesTableInjection(t *testing.T) {
+	// Attacker-controlled symbol name with pipes/newlines/backticks must not
+	// break out of the Markdown table cell when posted to a live MR note.
+	r := report{
+		ImpactedCount: 1,
+		MaxDepth:      1,
+		BlastRadius: []impacted{
+			{Name: "evil | col | inj\n## heading `x`", FilePath: "a|b\nc.go", Distance: 1},
+		},
+	}
+	md := renderMarkdown(r, []string{"changed | name"}, nil)
+	if strings.Contains(md, "evil | col") {
+		t.Fatalf("raw pipe leaked into table cell (injection), got:\n%s", md)
+	}
+	if strings.Contains(md, "\n## heading") {
+		t.Fatalf("newline/heading injection escaped the row, got:\n%s", md)
+	}
+	if !strings.Contains(md, "\\|") {
+		t.Fatalf("pipes should be escaped as \\|, got:\n%s", md)
+	}
+	// the verdict must still be a single well-formed table (one data row line)
+	if strings.Count(md, "| `") < 1 {
+		t.Fatalf("expected a code-wrapped cell, got:\n%s", md)
+	}
+}
+
+func TestUntestedImpact(t *testing.T) {
+	blast := []impacted{
+		{Name: "CalculateTax", FilePath: "calc/tax.go", Distance: 1},
+		{Name: "TotalWithTax", FilePath: "calc/order.go", Distance: 2},
+		{Name: "InvoiceTotal", FilePath: "calc/pipeline.go", Distance: 5},
+		{ID: "999", Name: "", Distance: 1}, // unresolved -> skipped (can't assess)
+	}
+	// test corpus references CalculateTax but not the others.
+	corpus := "func TestCalculateTax(t *testing.T){ CalculateTax(100) }\n"
+	got := untestedImpact(blast, corpus)
+	names := map[string]bool{}
+	for _, it := range got {
+		names[it.Name] = true
+	}
+	if names["CalculateTax"] {
+		t.Fatalf("CalculateTax is referenced in tests; must NOT be untested: %v", got)
+	}
+	if !names["TotalWithTax"] || !names["InvoiceTotal"] {
+		t.Fatalf("TotalWithTax and InvoiceTotal lack tests; must be untested: %v", got)
+	}
+	if len(got) != 2 {
+		t.Fatalf("want exactly 2 untested (unresolved skipped), got %d: %v", len(got), got)
+	}
+	// word-boundary: a name that is only a substring of a tested token is untested.
+	if u := untestedImpact([]impacted{{Name: "Tax"}}, "CalculateTax()"); len(u) != 1 {
+		t.Fatalf("'Tax' is only a substring of CalculateTax; must be untested, got %v", u)
+	}
+}
+
+func TestIsTestFile(t *testing.T) {
+	yes := []string{"calc/tax_test.go", "x/test_foo.py", "a/foo.test.ts", "b/Foo.spec.js", "m/BarTest.java", "pkg/__tests__/x.js"}
+	no := []string{"calc/tax.go", "main.go", "README.md", "src/foo.ts"}
+	for _, f := range yes {
+		if !isTestFile(f) {
+			t.Fatalf("%q should be a test file", f)
+		}
+	}
+	for _, f := range no {
+		if isTestFile(f) {
+			t.Fatalf("%q should NOT be a test file", f)
+		}
+	}
+}
+
+func TestRenderMarkdownShowsUntestedSection(t *testing.T) {
+	r := report{ImpactedCount: 1, MaxDepth: 2, BlastRadius: []impacted{{Name: "TotalWithTax", FilePath: "calc/order.go", Distance: 1}}}
+	md := renderMarkdown(r, []string{"CalculateTax"}, []impacted{{Name: "TotalWithTax", FilePath: "calc/order.go", Distance: 1}})
+	if !strings.Contains(md, "Untested blast radius") {
+		t.Fatalf("untested section missing:\n%s", md)
+	}
+	if !strings.Contains(md, "`TotalWithTax`") {
+		t.Fatalf("untested symbol not listed:\n%s", md)
+	}
+}
+
+func TestNormalizeSkipsEmptyAndNonCallsEdges(t *testing.T) {
+	var defs, calls orbitResp
+	defs.Result.Nodes = []orbitNode{{ID: "A", Name: "a"}, {ID: "B", Name: "b"}}
+	calls.Result.Edges = []orbitEdge{
+		{FromID: "A", ToID: "B", Type: "CALLS"}, // keep
+		{FromID: "", ToID: "B", Type: "CALLS"},  // drop: empty from (partial Orbit response)
+		{FromID: "A", ToID: "", Type: "CALLS"},  // drop: empty to
+		{FromID: "A", ToID: "B", Type: "IMPORTS"}, // drop: not CALLS
+	}
+	g := normalize(defs, calls)
+	if len(g.Edges) != 1 {
+		t.Fatalf("want 1 clean CALLS edge, got %d (%v)", len(g.Edges), g.Edges)
+	}
+	if g.Edges[0].From != "A" || g.Edges[0].To != "B" {
+		t.Fatalf("edge mapped wrong: %+v", g.Edges[0])
 	}
 }
 
 func TestRenderMarkdownShallowDoesNotClaimCap(t *testing.T) {
 	r := report{ImpactedCount: 1, MaxDepth: 2, BlastRadius: []impacted{{Name: "X", Distance: 2}}}
-	md := renderMarkdown(r, nil)
+	md := renderMarkdown(r, nil, nil)
 	if strings.Contains(md, "3-hop") {
 		t.Fatalf("depth<=3 must NOT claim to beat the 3-hop cap, got:\n%s", md)
 	}

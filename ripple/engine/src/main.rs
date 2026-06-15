@@ -30,7 +30,9 @@ struct Node {
 struct Edge {
     #[serde(default, rename = "type")]
     etype: String,
+    #[serde(default)]
     from: String,
+    #[serde(default)]
     to: String,
 }
 
@@ -85,7 +87,7 @@ fn analyze(graph: &Graph, changed: &[String]) -> Report {
         if let Some(cs) = callers.get(cur) {
             for &caller in cs {
                 if !dist.contains_key(caller) {
-                    dist.insert(caller, d + 1);
+                    dist.insert(caller, d.saturating_add(1));
                     queue.push_back(caller);
                 }
             }
@@ -106,7 +108,15 @@ fn analyze(graph: &Graph, changed: &[String]) -> Report {
             })
         })
         .collect();
-    blast.sort_by(|a, b| a.distance.cmp(&b.distance).then(a.name.cmp(&b.name)));
+    // Total order: distance, then name, then id (unique) so output is fully
+    // deterministic even when several impacted nodes share name/distance
+    // (e.g. multiple unnamed nodes) — required for reproducible MR verdicts.
+    blast.sort_by(|a, b| {
+        a.distance
+            .cmp(&b.distance)
+            .then_with(|| a.name.cmp(&b.name))
+            .then_with(|| a.id.cmp(&b.id))
+    });
 
     let max_depth = blast.iter().map(|x| x.distance).max().unwrap_or(0);
     Report {
@@ -141,9 +151,22 @@ fn main() {
         std::process::exit(2);
     }
 
-    let data = fs::read_to_string(&graph_path)
-        .unwrap_or_else(|e| panic!("failed to read {graph_path}: {e}"));
-    let graph: Graph = serde_json::from_str(&data).expect("invalid graph JSON");
+    // Graceful errors (not panics): the graph comes from untrusted Orbit-derived
+    // data, so malformed input must produce a clean message + non-zero exit.
+    let data = match fs::read_to_string(&graph_path) {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("ripple-engine: cannot read {graph_path}: {e}");
+            std::process::exit(1);
+        }
+    };
+    let graph: Graph = match serde_json::from_str(&data) {
+        Ok(g) => g,
+        Err(e) => {
+            eprintln!("ripple-engine: invalid graph JSON: {e}");
+            std::process::exit(1);
+        }
+    };
     let changed: Vec<String> = changed_arg
         .split(',')
         .map(|s| s.trim().to_string())
@@ -151,7 +174,13 @@ fn main() {
         .collect();
 
     let report = analyze(&graph, &changed);
-    println!("{}", serde_json::to_string_pretty(&report).unwrap());
+    match serde_json::to_string_pretty(&report) {
+        Ok(s) => println!("{s}"),
+        Err(e) => {
+            eprintln!("ripple-engine: failed to serialize report: {e}");
+            std::process::exit(1);
+        }
+    }
 }
 
 #[cfg(test)]

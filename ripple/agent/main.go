@@ -18,11 +18,16 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"regexp"
 	"strings"
+	"time"
+	"unicode/utf8"
 )
 
 // ---- Orbit raw (`--format raw`) response shapes ----
@@ -111,7 +116,9 @@ func normalize(defs, calls orbitResp) graph {
 		g.Nodes = append(g.Nodes, n)
 	}
 	for _, e := range calls.Result.Edges {
-		if e.Type == "CALLS" {
+		// Only real CALLS edges with both endpoints; empty from/to (seen in
+		// partial Orbit responses) would otherwise pollute the graph with ""->"".
+		if e.Type == "CALLS" && e.FromID != "" && e.ToID != "" {
 			g.Edges = append(g.Edges, gEdge{Type: "CALLS", From: e.FromID, To: e.ToID})
 		}
 	}
@@ -146,10 +153,90 @@ func resolveChanged(g graph, changedDefs, changedFiles []string) []string {
 	return out
 }
 
+// mdCell sanitizes text for a Markdown TABLE cell. GitLab's table parser splits
+// on '|' before inline parsing, so pipes and newlines must be neutralized to
+// prevent column/row injection from attacker-controlled symbol names or paths.
+func mdCell(s string) string {
+	s = strings.ReplaceAll(s, "\r", " ")
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.ReplaceAll(s, "|", "\\|")
+	return s
+}
+
+// mdCode renders s as inline code in a table cell: a backtick would close the
+// span, so backticks are replaced; pipes/newlines are neutralized via mdCell.
+func mdCode(s string) string {
+	return "`" + mdCell(strings.ReplaceAll(s, "`", "'")) + "`"
+}
+
+// isTestFile heuristically identifies test files across common languages. Orbit
+// does not index test code, so Ripple scans the checked-out repo itself to find
+// which transitively-impacted symbols no test references ("untested blast radius").
+func isTestFile(name string) bool {
+	base := filepath.Base(name)
+	suffixes := []string{
+		"_test.go", "_test.py", ".test.ts", ".test.tsx", ".test.js", ".test.jsx",
+		".spec.ts", ".spec.js", "_spec.rb", "_test.rb", "Test.java", "Tests.java",
+		"Test.kt", "Tests.cs", "_test.rs", "_test.cpp", "_test.cc",
+	}
+	for _, s := range suffixes {
+		if strings.HasSuffix(base, s) {
+			return true
+		}
+	}
+	if strings.HasPrefix(base, "test_") {
+		return true
+	}
+	return strings.Contains(name, "/test/") || strings.Contains(name, "/tests/") ||
+		strings.Contains(name, "/spec/") || strings.Contains(name, "/__tests__/")
+}
+
+// readTestCorpus concatenates the contents of every test file under root.
+func readTestCorpus(root string) string {
+	var b strings.Builder
+	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			switch d.Name() {
+			case ".git", "node_modules", "vendor", "target", "dist":
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if isTestFile(path) {
+			if data, e := os.ReadFile(path); e == nil {
+				b.Write(data)
+				b.WriteByte('\n')
+			}
+		}
+		return nil
+	})
+	return b.String()
+}
+
+// untestedImpact returns the impacted definitions whose symbol name is not
+// referenced anywhere in the test corpus (word-boundary match) — the
+// transitively-impacted symbols that no test exercises. Pure given the corpus.
+func untestedImpact(blast []impacted, testCorpus string) []impacted {
+	var out []impacted
+	for _, it := range blast {
+		if it.Name == "" {
+			continue // unresolved nodes can't be assessed by name
+		}
+		re := regexp.MustCompile(`\b` + regexp.QuoteMeta(it.Name) + `\b`)
+		if !re.MatchString(testCorpus) {
+			out = append(out, it)
+		}
+	}
+	return out
+}
+
 // renderMarkdown turns an engine report into a Markdown MR verdict. Pure (no I/O)
-// so it can be unit-tested. changedNames are the human-readable names of the
-// changed definitions (falls back to IDs when a name is unknown).
-func renderMarkdown(r report, changedNames []string) string {
+// so it can be unit-tested. Unnamed/unresolved nodes (Orbit sometimes returns a
+// Definition without name/file metadata) are labeled rather than rendered blank.
+func renderMarkdown(r report, changedNames []string, untested []impacted) string {
 	var b strings.Builder
 	b.WriteString("## 🌊 Ripple — change-impact analysis\n\n")
 	if len(changedNames) > 0 {
@@ -158,7 +245,7 @@ func renderMarkdown(r report, changedNames []string) string {
 			if i > 0 {
 				b.WriteString(", ")
 			}
-			b.WriteString("`" + n + "`")
+			b.WriteString(mdCode(n))
 		}
 		b.WriteString("\n\n")
 	}
@@ -174,9 +261,27 @@ func renderMarkdown(r report, changedNames []string) string {
 	for _, it := range r.BlastRadius {
 		name := it.Name
 		if name == "" {
-			name = it.ID
+			name = fmt.Sprintf("(unresolved #%s)", it.ID)
 		}
-		b.WriteString(fmt.Sprintf("| `%s` | %s | %d |\n", name, it.FilePath, it.Distance))
+		file := it.FilePath
+		if file == "" {
+			file = "—"
+		}
+		b.WriteString(fmt.Sprintf("| %s | %s | %d |\n", mdCode(name), mdCell(file), it.Distance))
+	}
+	if len(untested) > 0 {
+		b.WriteString(fmt.Sprintf("\n🚦 **Untested blast radius — %d impacted definition(s) with NO test coverage** (highest risk):\n", len(untested)))
+		for _, it := range untested {
+			name := it.Name
+			if name == "" {
+				name = fmt.Sprintf("(unresolved #%s)", it.ID)
+			}
+			file := it.FilePath
+			if file == "" {
+				file = "—"
+			}
+			b.WriteString(fmt.Sprintf("- %s (%s)\n", mdCode(name), mdCell(file)))
+		}
 	}
 	b.WriteString("\n<sub>Transitive reverse-`CALLS` closure computed by the Ripple engine over GitLab Orbit's knowledge graph.</sub>\n")
 	return b.String()
@@ -193,7 +298,7 @@ func postMRNote(host, token string, projectID, mrIID int, body string) error {
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Authorization", "Bearer "+token)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return err
 	}
@@ -233,6 +338,9 @@ func queryGlab(body string) (orbitResp, error) {
 	return out, json.Unmarshal(so.Bytes(), &out)
 }
 
+// httpClient bounds every GitLab/Orbit call so a hung endpoint can't hang the agent.
+var httpClient = &http.Client{Timeout: 30 * time.Second}
+
 func queryREST(body, host, token string) (orbitResp, error) {
 	var out orbitResp
 	req, err := http.NewRequest("POST", "https://"+host+"/api/v4/orbit/query", strings.NewReader(body))
@@ -241,7 +349,7 @@ func queryREST(body, host, token string) (orbitResp, error) {
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+token)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return out, err
 	}
@@ -254,8 +362,8 @@ func queryREST(body, host, token string) (orbitResp, error) {
 }
 
 func truncate(s string, n int) string {
-	if len(s) > n {
-		return s[:n]
+	if utf8.RuneCountInString(s) > n {
+		return string([]rune(s)[:n])
 	}
 	return s
 }
@@ -296,6 +404,8 @@ func main() {
 	format := flag.String("format", "json", "verdict output when not posting: json | md")
 	postMR := flag.Int("post-mr", 0, "if >0, POST the verdict as a note to this merge request IID")
 	mrProject := flag.Int("mr-project-id", 0, "project ID for --post-mr (defaults to --project-id)")
+	repoRoot := flag.String("repo-root", "", "repo checkout to scan for test coverage of impacted symbols (untested blast radius)")
+	gateUntested := flag.Int("gate-untested", -1, "if >=0, exit non-zero when untested-impacted count exceeds N (gates the MR)")
 	flag.Parse()
 
 	if *pid == 0 || *enginePath == "" {
@@ -304,12 +414,17 @@ func main() {
 	}
 
 	query := queryGlab
-	if *mode == "rest" {
+	switch *mode {
+	case "glab":
+		// default: shell out to the glab CLI
+	case "rest":
 		token := orbitToken()
 		if token == "" {
 			fatal(fmt.Errorf("rest mode requires AI_FLOW_GITLAB_TOKEN or GITLAB_TOKEN env var"))
 		}
 		query = func(body string) (orbitResp, error) { return queryREST(body, *host, token) }
+	default:
+		fatal(fmt.Errorf("unknown --mode %q (want glab or rest)", *mode))
 	}
 
 	defs, err := query(defsQuery(*pid))
@@ -341,6 +456,10 @@ func main() {
 		fatal(fmt.Errorf("engine failed: %v", err))
 	}
 
+	if *graphOut == "" {
+		os.Remove(graphPath) // best-effort cleanup of the auto-created temp graph
+	}
+
 	var rep report
 	fatal(json.Unmarshal(engineOut, &rep))
 
@@ -358,7 +477,16 @@ func main() {
 		}
 	}
 
-	if *postMR > 0 {
+	// Untested blast radius: which transitively-impacted symbols no test covers.
+	var untested []impacted
+	if *repoRoot != "" {
+		untested = untestedImpact(rep.BlastRadius, readTestCorpus(*repoRoot))
+	}
+
+	md := renderMarkdown(rep, changedNames, untested)
+
+	switch {
+	case *postMR > 0:
 		token := orbitToken()
 		if token == "" {
 			fatal(fmt.Errorf("--post-mr requires AI_FLOW_GITLAB_TOKEN or GITLAB_TOKEN env var"))
@@ -367,15 +495,22 @@ func main() {
 		if proj == 0 {
 			proj = *pid
 		}
-		fatal(postMRNote(*host, token, proj, *postMR, renderMarkdown(rep, changedNames)))
-		fmt.Printf("posted Ripple verdict to MR !%d (project %d): %d impacted, max depth %d\n",
-			*postMR, proj, rep.ImpactedCount, rep.MaxDepth)
-		return
+		fatal(postMRNote(*host, token, proj, *postMR, md))
+		fmt.Printf("posted Ripple verdict to MR !%d (project %d): %d impacted, %d untested, max depth %d\n",
+			*postMR, proj, rep.ImpactedCount, len(untested), rep.MaxDepth)
+	case *format == "md":
+		fmt.Println(md)
+	default:
+		fmt.Print(string(engineOut))
 	}
 
-	if *format == "md" {
-		fmt.Println(renderMarkdown(rep, changedNames))
-	} else {
-		fmt.Print(string(engineOut))
+	// Deterministic gate: fail the pipeline (block the MR) when too many
+	// transitively-impacted symbols are untested. This is what makes Ripple a
+	// governance GATE, not just a comment.
+	if *gateUntested >= 0 && len(untested) > *gateUntested {
+		fmt.Fprintf(os.Stderr,
+			"ripple-agent: GATE FAILED — %d untested impacted definition(s) exceed threshold %d\n",
+			len(untested), *gateUntested)
+		os.Exit(1)
 	}
 }
