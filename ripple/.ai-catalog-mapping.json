@@ -1,0 +1,26 @@
+{
+  "schema_version": "1.0",
+  "agents": {
+    "agents/faultline-impact-reviewer.yml": {
+      "catalog_id": "gid://gitlab/Ai::Catalog::Item/1011277",
+      "name": "Faultline Impact Reviewer",
+      "created_at": "2026-06-16T13:08:51.292Z",
+      "item_consumers": {
+        "group": {
+          "id": "gid://gitlab/Ai::Catalog::ItemConsumer/9102751"
+        },
+        "project": {
+          "id": "gid://gitlab/Ai::Catalog::ItemConsumer/9102752"
+        },
+        "additional": []
+      },
+      "latest_sync": {
+        "git_tag": "0.0.2",
+        "catalog_version": "1.0.0",
+        "synced_at": "2026-06-16T13:08:51.292Z",
+        "definition_hash": "4e6463f9c80be05e"
+      }
+    }
+  },
+  "flows": {}
+}

@@ -1,11 +1,11 @@
-# Ripple — AI Catalog Layer
+# Faultline — AI Catalog Layer
 
-A thin, **platform-native** companion to Ripple, published to the GitLab AI
+A thin, **platform-native** companion to Faultline, published to the GitLab AI
 Catalog as a **declarative GitLab Duo agent**.
 
 ## What this layer is
 
-Ripple's real compute is a **Rust engine** (`engine/`) + **Go agent**
+Faultline's real compute is a **Rust engine** (`engine/`) + **Go agent**
 (`agent/`) that run in CI: the Go agent pulls a bounded code subgraph from
 GitLab Orbit, and the Rust engine computes the *full transitive closure* of a
 change's "blast radius" (Orbit's query DSL is capped at 3 hops, so we close it
@@ -20,7 +20,7 @@ posts a concise Markdown verdict as an MR note.
 > Declarative / ambient catalog agents **cannot run our binary**. They use only
 > the platform's built-in tools (diff/file/grep/note). This layer is therefore
 > a lighter, dependency-free *estimate* of impact and an integration story — the
-> precise, unbounded closure still comes from the Ripple engine in CI.
+> precise, unbounded closure still comes from the Faultline engine in CI.
 
 ## How it relates to the CI engine
 
@@ -37,9 +37,9 @@ front door; the CI engine is the precise backend.
 
 ## Files
 
-- `agents/ripple-impact-reviewer.yml` — the declarative Duo agent (primary
+- `agents/faultline-impact-reviewer.yml` — the declarative Duo agent (primary
   deliverable; schema-verified).
-- `flows/ripple-impact.yml` — optional minimal flow-registry v1 example
+- `flows/faultline-impact.yml` — optional minimal flow-registry v1 example
   (best-effort; see VERIFY list).
 - `.gitlab-ci.yml` — catalog-sync include that publishes the above on a tag.
 
@@ -56,9 +56,9 @@ Do these in order:
    - Mark it **Masked** and **Protected**.
 
 2. **Confirm the group_id** in both `.gitlab-ci.yml` (input `group_id`) and
-   `agents/ripple-impact-reviewer.yml` (`consumers[].group_id`). See VERIFY.
+   `agents/faultline-impact-reviewer.yml` (`consumers[].group_id`). See VERIFY.
 
-3. **Tag and push to trigger the sync** (run from this `ripple/` repo root):
+3. **Tag and push to trigger the sync** (run from this `faultline/` repo root):
 
    ```sh
    git tag 0.0.1
@@ -81,14 +81,14 @@ Do these in order:
 After the agent appears in the AI Catalog, **enable it in the consumer
 project(s)** so it responds to MR triggers:
 
-- The `consumers` block in `agents/ripple-impact-reviewer.yml` declares the
-  target `group_id`, the `projects` (currently `ripple-demo-go`,
-  project_id `83317688`), and `trigger_types` (`mention`, `merge_request`).
+- The `consumers` block in `agents/faultline-impact-reviewer.yml` declares the
+  target `group_id`, the `projects` (currently `faultline-demo`,
+  project_id `83369596`), and `trigger_types` (`mention`, `merge_request`).
 - Enabling across member projects requires a **group-level access token**
   (`api` scope, Maintainer). Confirm the agent is listed for the group, then
-  verify it is toggled on for `ripple-demo-go`.
-- Smoke test: open/mention on an MR in `ripple-demo-go` and confirm a
-  "Ripple — Change Impact" note is posted.
+  verify it is toggled on for `faultline-demo`.
+- Smoke test: open/mention on an MR in `faultline-demo` and confirm a
+  "Faultline — Change Impact" note is posted.
 
 ## TO VERIFY before publishing
 
@@ -101,12 +101,12 @@ project(s)** so it responds to MR triggers:
   Duo/Catalog features). If gated, this layer is documentation-only until the
   tier is upgraded.
 - [ ] **Declarative-only constraint.** Confirm understanding that ambient
-  catalog agents **cannot run the Ripple binary** — this layer is an LLM-driven
+  catalog agents **cannot run the Faultline binary** — this layer is an LLM-driven
   estimate using built-in tools, not the precise engine.
 - [ ] **Token scopes/roles.** `CATALOG_SYNC_TOKEN` = Project Access Token,
   `api`, Maintainer; a **group-level** token for project enablement.
-- [ ] **`ripple-demo-go` project_id** `83317688` and that it belongs to the
+- [ ] **`faultline-demo` project_id** `83369596` and that it belongs to the
   same top-level group as `group_id`.
-- [ ] **Flow form (`flows/ripple-impact.yml`).** The declarative agent schema
+- [ ] **Flow form (`flows/faultline-impact.yml`).** The declarative agent schema
   is verified; the flow-registry v1 key set is best-effort — validate against
   `gitlab.com/components/ai-catalog` before relying on the flow.

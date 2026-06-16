@@ -1,5 +1,5 @@
-// ripple-agent assembles a code subgraph from GitLab Orbit and runs the
-// ripple-engine to compute the transitive change-impact ("blast radius") of an
+// faultline-agent assembles a code subgraph from GitLab Orbit and runs the
+// faultline-engine to compute the transitive change-impact ("blast radius") of an
 // MR's changed definitions.
 //
 // Orbit's query DSL is capped at 3 hops, so the agent fetches the project's
@@ -56,7 +56,7 @@ type orbitResp struct {
 	} `json:"result"`
 }
 
-// ---- normalized graph consumed by ripple-engine ----
+// ---- normalized graph consumed by faultline-engine ----
 
 type gNode struct {
 	ID             string `json:"id"`
@@ -76,7 +76,7 @@ type graph struct {
 	Edges []gEdge `json:"edges"`
 }
 
-// ---- engine report (mirror of ripple-engine's Report) ----
+// ---- engine report (mirror of faultline-engine's Report) ----
 
 type impacted struct {
 	ID             string `json:"id"`
@@ -171,7 +171,7 @@ func mdCode(s string) string {
 }
 
 // isTestFile heuristically identifies test files across common languages. Orbit
-// does not index test code, so Ripple scans the checked-out repo itself to find
+// does not index test code, so Faultline scans the checked-out repo itself to find
 // which transitively-impacted symbols no test references ("untested blast radius").
 func isTestFile(name string) bool {
 	base := filepath.Base(name)
@@ -330,10 +330,10 @@ func buildMermaid(g graph, changed []string, r report, untested []impacted) stri
 	return b.String()
 }
 
-// recipeComparison renders Ripple's headline differentiator. Orbit's query DSL
+// recipeComparison renders Faultline's headline differentiator. Orbit's query DSL
 // is hard-capped at 3 hops (max_hops <= 3), so even an optimally-written native
 // reverse-`CALLS` query can only reach impacted definitions within 3 hops of the
-// change. Ripple's engine computes the full transitive closure. This block
+// change. Faultline's engine computes the full transitive closure. This block
 // quantifies the gap and lists the impacted definitions that lie beyond ANY
 // single Orbit query (>= 4 hops). Returns "" when nothing is beyond reach, so we
 // never overclaim on a shallow change. Pure (no I/O).
@@ -354,9 +354,9 @@ func recipeComparison(r report) string {
 		return "" // entirely within Orbit's 3-hop reach — no moat to claim
 	}
 	var b strings.Builder
-	b.WriteString("\n**🔭 Orbit 3-hop query vs Ripple closure**\n")
+	b.WriteString("\n**🔭 Orbit 3-hop query vs Faultline closure**\n")
 	b.WriteString(fmt.Sprintf(
-		"Orbit's query DSL is hard-capped at 3 hops (`max_hops` ≤ 3). A native reverse-`CALLS` query therefore reaches at most **%d of %d** impacted definition(s); the other **%d** sit ≥ 4 hops from the change and are invisible to *any* single Orbit query. Ripple computes the full closure and surfaces them:\n",
+		"Orbit's query DSL is hard-capped at 3 hops (`max_hops` ≤ 3). A native reverse-`CALLS` query therefore reaches at most **%d of %d** impacted definition(s); the other **%d** sit ≥ 4 hops from the change and are invisible to *any* single Orbit query. Faultline computes the full closure and surfaces them:\n",
 		within, r.ImpactedCount, len(beyond)))
 	for _, it := range beyond {
 		name := it.Name
@@ -377,7 +377,7 @@ func recipeComparison(r report) string {
 // Definition without name/file metadata) are labeled rather than rendered blank.
 func renderMarkdown(r report, changedNames []string, untested []impacted) string {
 	var b strings.Builder
-	b.WriteString("## 🌊 Ripple — change-impact analysis\n\n")
+	b.WriteString("## 🪨 Faultline — change-impact analysis\n\n")
 	if len(changedNames) > 0 {
 		b.WriteString("**Changed:** ")
 		for i, n := range changedNames {
@@ -425,7 +425,7 @@ func renderMarkdown(r report, changedNames []string, untested []impacted) string
 			b.WriteString(fmt.Sprintf("- %s (%s)\n", mdCode(name), mdCell(file)))
 		}
 	}
-	b.WriteString("\n<sub>Transitive reverse-`CALLS` closure computed by the Ripple engine over GitLab Orbit's knowledge graph.</sub>\n")
+	b.WriteString("\n<sub>Transitive reverse-`CALLS` closure computed by the Faultline engine over GitLab Orbit's knowledge graph.</sub>\n")
 	return b.String()
 }
 
@@ -530,7 +530,7 @@ func splitNonEmpty(s string) []string {
 
 func fatal(err error) {
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "ripple-agent:", err)
+		fmt.Fprintln(os.Stderr, "faultline-agent:", err)
 		os.Exit(1)
 	}
 }
@@ -539,7 +539,7 @@ func main() {
 	pid := flag.Int("project-id", 0, "GitLab project ID")
 	changedDefs := flag.String("changed-defs", "", "comma-separated Definition IDs changed")
 	changedFiles := flag.String("changed-files", "", "comma-separated changed file paths")
-	enginePath := flag.String("engine", "", "path to ripple-engine binary")
+	enginePath := flag.String("engine", "", "path to faultline-engine binary")
 	mode := flag.String("mode", "glab", "orbit access mode: glab | rest")
 	host := flag.String("host", "gitlab.com", "GitLab host (rest mode)")
 	graphOut := flag.String("graph-out", "", "optional path to write the normalized graph JSON")
@@ -551,7 +551,7 @@ func main() {
 	flag.Parse()
 
 	if *pid == 0 || *enginePath == "" {
-		fmt.Fprintln(os.Stderr, "usage: ripple-agent --project-id N --engine PATH [--mode glab|rest] [--format md] [--post-mr IID] (--changed-defs IDs | --changed-files paths)")
+		fmt.Fprintln(os.Stderr, "usage: faultline-agent --project-id N --engine PATH [--mode glab|rest] [--format md] [--post-mr IID] (--changed-defs IDs | --changed-files paths)")
 		os.Exit(2)
 	}
 
@@ -582,7 +582,7 @@ func main() {
 
 	graphPath := *graphOut
 	if graphPath == "" {
-		f, err := os.CreateTemp("", "ripple-graph-*.json")
+		f, err := os.CreateTemp("", "faultline-graph-*.json")
 		fatal(err)
 		graphPath = f.Name()
 		f.Close()
@@ -642,7 +642,7 @@ func main() {
 			proj = *pid
 		}
 		fatal(postMRNote(*host, token, proj, *postMR, md))
-		fmt.Printf("posted Ripple verdict to MR !%d (project %d): %d impacted, %d untested, max depth %d\n",
+		fmt.Printf("posted Faultline verdict to MR !%d (project %d): %d impacted, %d untested, max depth %d\n",
 			*postMR, proj, rep.ImpactedCount, len(untested), rep.MaxDepth)
 	case *format == "md":
 		fmt.Println(md)
@@ -651,11 +651,11 @@ func main() {
 	}
 
 	// Deterministic gate: fail the pipeline (block the MR) when too many
-	// transitively-impacted symbols are untested. This is what makes Ripple a
+	// transitively-impacted symbols are untested. This is what makes Faultline a
 	// governance GATE, not just a comment.
 	if *gateUntested >= 0 && len(untested) > *gateUntested {
 		fmt.Fprintf(os.Stderr,
-			"ripple-agent: GATE FAILED — %d untested impacted definition(s) exceed threshold %d\n",
+			"faultline-agent: GATE FAILED — %d untested impacted definition(s) exceed threshold %d\n",
 			len(untested), *gateUntested)
 		os.Exit(1)
 	}

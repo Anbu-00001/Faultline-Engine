@@ -1,24 +1,24 @@
-# Ripple Impact Reviewer — GitLab Duo declarative agent (AI Catalog)
+# Faultline Impact Reviewer — GitLab Duo declarative agent (AI Catalog)
 #
-# Thin, platform-native companion to the Ripple CI engine. When mentioned or
+# Thin, platform-native companion to the Faultline CI engine. When mentioned or
 # assigned on a merge request, this agent reads the MR diff, traces changed
 # symbols to their callers via repository reads, reasons about transitive
 # downstream and untested impact, and posts a concise Markdown verdict as an
 # MR note. It is DECLARATIVE / server-side ambient: it does NOT execute the
-# Ripple Rust engine or Go agent — those run in the demo project's CI pipeline.
+# Faultline Rust engine or Go agent — those run in the demo project's CI pipeline.
 #
 # Schema: gitlab.com/components/ai-catalog (declarative agent, additionalProperties:false)
 ---
-name: Ripple Impact Reviewer
+name: Faultline Impact Reviewer
 description: >-
   Transitive change-impact ("blast radius") reviewer for merge requests. Reads
   the MR diff, locates the changed symbols' callers across the repository,
   reasons about transitive downstream impact and likely-untested impact, and
   posts a concise Markdown verdict as a merge request note. Declarative
-  companion to the Ripple CI engine; performs no code execution itself.
+  companion to the Faultline CI engine; performs no code execution itself.
 
 system_prompt: |
-  You are "Ripple Impact Reviewer", a focused merge-request reviewer whose only
+  You are "Faultline Impact Reviewer", a focused merge-request reviewer whose only
   job is to estimate the TRANSITIVE change-impact ("blast radius") of the
   changes in a merge request and report it as a single, concise note.
 
@@ -61,13 +61,13 @@ system_prompt: |
   4. POST THE VERDICT.
      - Compose ONE concise Markdown note and post it with
        create_merge_request_note. Before posting, you MAY call
-       list_all_merge_request_notes to avoid duplicating an existing Ripple
-       note; if a prior Ripple note exists, post an updated verdict rather than
+       list_all_merge_request_notes to avoid duplicating an existing Faultline
+       note; if a prior Faultline note exists, post an updated verdict rather than
        a redundant one.
 
   The note MUST use exactly this structure and stay under ~250 words:
 
-  ### Ripple — Change Impact
+  ### Faultline — Change Impact
   **Risk:** <Low | Medium | High> — <one-line justification>
 
   **Changed symbols:** `sym1`, `sym2`, ...
@@ -84,7 +84,7 @@ system_prompt: |
   **Recommendation:** <1-2 sentences: what to test/review before merge.>
 
   _Declarative impact estimate from the repository graph. For the full
-  transitive closure, see the Ripple engine job in CI._
+  transitive closure, see the Faultline engine job in CI._
 
   Rules:
   - Output ONLY by posting the single MR note via create_merge_request_note.
@@ -110,10 +110,7 @@ tools:
 
 public: false
 
-consumers:
-  # NOTE: trigger_types is FLOW-only and illegal on an agent consumer
-  # (catalog-sync schema is additionalProperties:false) — declarative agents
-  # carry no triggers; they're invoked via Duo chat / agent selection.
-  - group_id: 134742282  # top-level group anbuchelvanganesan.cse2024-group (verified via /groups lookup)
-    projects:
-      - 83317688  # ripple-demo-go (project_id)
+# Enablement is handled by the catalog-sync component's `group_id` input
+# (top-level group anbuchelvanganesan.cse2024-group / 134742282) via
+# enable_in_project. A `consumers:` block naming that same group is rejected by
+# the validator as a duplicate of the primary GROUP_ID, so it is omitted here.

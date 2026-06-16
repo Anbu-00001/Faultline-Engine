@@ -1,4 +1,4 @@
-//! Ripple graph engine.
+//! Faultline graph engine.
 //!
 //! Orbit's query DSL is capped at 3 hops with no transitive closure, so deep
 //! call chains cannot be analyzed by the API alone. This engine ingests a
@@ -147,7 +147,7 @@ fn main() {
     }
 
     if graph_path.is_empty() {
-        eprintln!("usage: ripple-engine --graph <graph.json> --changed <id,id,...>");
+        eprintln!("usage: faultline-engine --graph <graph.json> --changed <id,id,...>");
         std::process::exit(2);
     }
 
@@ -156,14 +156,14 @@ fn main() {
     let data = match fs::read_to_string(&graph_path) {
         Ok(d) => d,
         Err(e) => {
-            eprintln!("ripple-engine: cannot read {graph_path}: {e}");
+            eprintln!("faultline-engine: cannot read {graph_path}: {e}");
             std::process::exit(1);
         }
     };
     let graph: Graph = match serde_json::from_str(&data) {
         Ok(g) => g,
         Err(e) => {
-            eprintln!("ripple-engine: invalid graph JSON: {e}");
+            eprintln!("faultline-engine: invalid graph JSON: {e}");
             std::process::exit(1);
         }
     };
@@ -177,7 +177,7 @@ fn main() {
     match serde_json::to_string_pretty(&report) {
         Ok(s) => println!("{s}"),
         Err(e) => {
-            eprintln!("ripple-engine: failed to serialize report: {e}");
+            eprintln!("faultline-engine: failed to serialize report: {e}");
             std::process::exit(1);
         }
     }
@@ -194,7 +194,7 @@ mod tests {
         Edge { etype: "CALLS".into(), from: from.into(), to: to.into() }
     }
 
-    // Mirrors the verified ripple-demo-go calc graph:
+    // Mirrors the verified faultline-demo calc graph:
     //   TotalWithTax -> CalculateTax -> {applyRate, standardRate}; ApplyDiscount isolated.
     fn sample() -> Graph {
         Graph {

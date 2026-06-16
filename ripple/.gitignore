@@ -1,5 +1,5 @@
 /engine/target/
-/agent/ripple-agent
+/agent/faultline-agent
 *.log
-.ripple_token
+.faultline_token
 pat_*.json

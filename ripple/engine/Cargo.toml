@@ -1,12 +1,12 @@
 [package]
-name = "ripple-engine"
+name = "faultline-engine"
 version = "0.1.0"
 edition = "2021"
-description = "Ripple's graph engine: transitive change-impact analysis over a GitLab Orbit code subgraph"
+description = "Faultline's graph engine: transitive change-impact analysis over a GitLab Orbit code subgraph"
 license = "MIT"
 
 [[bin]]
-name = "ripple-engine"
+name = "faultline-engine"
 path = "src/main.rs"
 
 [dependencies]
