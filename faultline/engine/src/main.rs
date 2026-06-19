@@ -131,10 +131,244 @@ fn analyze(graph: &Graph, changed: &[String]) -> Report {
     }
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+struct CutNode {
+    id: String,
+    name: String,
+    file_path: String,
+}
+
+struct CutResult {
+    /// The minimum set of currently-untested definitions to add a test at, such
+    /// that *every* impact path from a changed symbol to untested code is
+    /// intercepted by a tested checkpoint. This is the prescriptive headline:
+    /// "don't test all N untested symbols — test these K."
+    targets: Vec<CutNode>,
+    /// Total untested impacted definitions (the gap *before* optimization), so the
+    /// verdict can say "K of N".
+    untested_count: usize,
+}
+
+#[derive(Clone)]
+struct FlowEdge {
+    to: usize,
+    cap: i64,
+    rev: usize,
+}
+
+/// Minimum test-placement cut.
+///
+/// Models test-gap remediation as a minimum s-t **vertex** cut (Even's node-splitting
+/// reduction to max-flow / min-cut; Menger 1927, Ford–Fulkerson 1956): the smallest
+/// set of currently-untested definitions where adding a test intercepts every impact
+/// path from a changed symbol to untested code. Already-tested definitions are *free*
+/// interceptors (capacity 0 — a path already passing through a test needs no new one);
+/// changed definitions are sources (capacity ∞, never themselves a test target). By
+/// Menger's theorem `|cut| == ` the number of vertex-disjoint untested impact paths.
+///
+/// Honest scope: this is the single super-source → super-sink vertex cut, computed in
+/// polynomial time — NOT the (NP-hard) multiway/multicut variant — and it intercepts
+/// every *known* call/inheritance path (path interception, not a fault-detection proof).
+/// All construction inputs are sorted, so the chosen minimum cut is deterministic
+/// (a reproducible verdict, not just *a* minimum cut).
+fn min_test_cut(graph: &Graph, changed: &[String], tested: &[String]) -> CutResult {
+    let node_by_id: HashMap<&str, &Node> =
+        graph.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
+
+    // Impact adjacency: imp[u] = the callers of u. Impact flows u -> caller, the
+    // reverse of the CALLS/EXTENDS source edges and the same direction analyze()
+    // propagates the blast radius. Self-edges are dropped (an Orbit artifact, e.g.
+    // Ruby `super` / Go embedding promotion) — they cannot be on a source->sink path.
+    let mut imp: HashMap<&str, Vec<&str>> = HashMap::new();
+    for e in &graph.edges {
+        if matches!(e.etype.as_str(), "CALLS" | "EXTENDS" | "") && e.from != e.to {
+            imp.entry(e.to.as_str()).or_default().push(e.from.as_str());
+        }
+    }
+    for v in imp.values_mut() {
+        v.sort_unstable();
+        v.dedup();
+    }
+
+    let changed_set: HashSet<&str> = changed
+        .iter()
+        .map(|s| s.as_str())
+        .filter(|c| node_by_id.contains_key(c))
+        .collect();
+    let tested_set: HashSet<&str> = tested.iter().map(|s| s.as_str()).collect();
+
+    // impacted = reachable from changed in `imp`, excluding the changed set itself.
+    let mut impacted: HashSet<&str> = HashSet::new();
+    let mut seen: HashSet<&str> = changed_set.clone();
+    let mut start: Vec<&str> = changed_set.iter().copied().collect();
+    start.sort_unstable();
+    let mut q: VecDeque<&str> = start.into_iter().collect();
+    while let Some(cur) = q.pop_front() {
+        if let Some(adj) = imp.get(cur) {
+            for &nx in adj {
+                if seen.insert(nx) {
+                    if !changed_set.contains(nx) {
+                        impacted.insert(nx);
+                    }
+                    q.push_back(nx);
+                }
+            }
+        }
+    }
+
+    let mut untested_sinks: Vec<&str> = impacted
+        .iter()
+        .copied()
+        .filter(|id| !tested_set.contains(id))
+        .collect();
+    untested_sinks.sort_unstable();
+    let untested_count = untested_sinks.len();
+    if untested_sinks.is_empty() {
+        return CutResult { targets: vec![], untested_count };
+    }
+
+    // Flow network with node splitting over V = changed ∪ impacted (sorted ⇒ the
+    // resulting min cut is deterministic). node v -> (in = 2i, out = 2i+1).
+    let mut vids: Vec<&str> = changed_set.iter().chain(impacted.iter()).copied().collect();
+    vids.sort_unstable();
+    vids.dedup();
+    let idx: HashMap<&str, usize> = vids.iter().enumerate().map(|(i, &s)| (s, i)).collect();
+    let n = vids.len();
+    let ss = 2 * n; // super source
+    let tt = 2 * n + 1; // super sink
+    let total = 2 * n + 2;
+    const INF: i64 = 1 << 30;
+
+    let mut g: Vec<Vec<FlowEdge>> = vec![Vec::new(); total];
+    fn add(g: &mut [Vec<FlowEdge>], a: usize, b: usize, cap: i64) {
+        let ai = g[a].len();
+        let bi = g[b].len();
+        g[a].push(FlowEdge { to: b, cap, rev: bi });
+        g[b].push(FlowEdge { to: a, cap: 0, rev: ai });
+    }
+
+    // Internal in->out edges: changed = ∞ (never a target), tested = 0 (free, blocks
+    // flow), every other (untested) impacted node = 1 (a candidate test placement).
+    for (i, &v) in vids.iter().enumerate() {
+        let cap = if changed_set.contains(v) {
+            INF
+        } else if tested_set.contains(v) {
+            0
+        } else {
+            1
+        };
+        add(&mut g, 2 * i, 2 * i + 1, cap);
+    }
+    // Impact edges u_out -> v_in (∞), collected + sorted for determinism.
+    let mut fe: Vec<(usize, usize)> = Vec::new();
+    for (&u, adj) in imp.iter() {
+        if let Some(&ui) = idx.get(u) {
+            for &v in adj {
+                if let Some(&vi) = idx.get(v) {
+                    fe.push((2 * ui + 1, 2 * vi));
+                }
+            }
+        }
+    }
+    fe.sort_unstable();
+    for (a, b) in fe {
+        add(&mut g, a, b, INF);
+    }
+    let mut chs: Vec<&str> = changed_set.iter().copied().collect();
+    chs.sort_unstable();
+    for c in chs {
+        add(&mut g, ss, 2 * idx[c], INF);
+    }
+    for s in &untested_sinks {
+        add(&mut g, 2 * idx[*s] + 1, tt, INF);
+    }
+
+    // Edmonds-Karp max flow (BFS augmenting paths; deterministic given sorted build).
+    loop {
+        let mut par: Vec<(i32, i32)> = vec![(-1, -1); total];
+        par[ss] = (ss as i32, -1);
+        let mut bq: VecDeque<usize> = VecDeque::new();
+        bq.push_back(ss);
+        while let Some(u) = bq.pop_front() {
+            for (ei, e) in g[u].iter().enumerate() {
+                if e.cap > 0 && par[e.to].0 == -1 {
+                    par[e.to] = (u as i32, ei as i32);
+                    bq.push_back(e.to);
+                }
+            }
+        }
+        if par[tt].0 == -1 {
+            break;
+        }
+        let mut bottleneck = INF;
+        let mut v = tt;
+        while v != ss {
+            let (pu, pe) = par[v];
+            let (pu, pe) = (pu as usize, pe as usize);
+            bottleneck = bottleneck.min(g[pu][pe].cap);
+            v = pu;
+        }
+        let mut v = tt;
+        while v != ss {
+            let (pu, pe) = par[v];
+            let (pu, pe) = (pu as usize, pe as usize);
+            g[pu][pe].cap -= bottleneck;
+            let rev = g[pu][pe].rev;
+            g[v][rev].cap += bottleneck;
+            v = pu;
+        }
+    }
+
+    // Canonical minimum cut: nodes reachable from the source in the residual graph.
+    let mut reach = vec![false; total];
+    reach[ss] = true;
+    let mut bq: VecDeque<usize> = VecDeque::new();
+    bq.push_back(ss);
+    while let Some(u) = bq.pop_front() {
+        for e in &g[u] {
+            if e.cap > 0 && !reach[e.to] {
+                reach[e.to] = true;
+                bq.push_back(e.to);
+            }
+        }
+    }
+    // A node is a test target iff it is an untested (capacity-1) node whose internal
+    // in->out edge crosses the cut (in reachable, out not).
+    let mut targets: Vec<CutNode> = Vec::new();
+    for (i, &v) in vids.iter().enumerate() {
+        let cuttable = !changed_set.contains(v) && !tested_set.contains(v);
+        if cuttable && reach[2 * i] && !reach[2 * i + 1] {
+            if let Some(node) = node_by_id.get(v) {
+                targets.push(CutNode {
+                    id: node.id.clone(),
+                    name: node.name.clone(),
+                    file_path: node.file_path.clone(),
+                });
+            }
+        }
+    }
+    targets.sort_by(|a, b| a.name.cmp(&b.name).then_with(|| a.id.cmp(&b.id)));
+    CutResult { targets, untested_count }
+}
+
+/// Output: the blast-radius `Report` plus the prescriptive minimum-test-set cut.
+#[derive(Serialize)]
+struct FullReport {
+    #[serde(flatten)]
+    blast: Report,
+    /// Untested definitions inside the blast radius (the gap before optimization).
+    untested_count: usize,
+    /// The minimum set of definitions to add a test at to gate the whole change.
+    minimum_test_set: Vec<CutNode>,
+    /// Menger dual: the number of vertex-disjoint untested impact paths (== set size).
+    disjoint_untested_paths: usize,
+}
+
 fn main() {
     let args: Vec<String> = env::args().collect();
     let mut graph_path = String::new();
     let mut changed_arg = String::new();
+    let mut tested_arg = String::new();
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
@@ -144,6 +378,10 @@ fn main() {
             }
             "--changed" => {
                 changed_arg = args.get(i + 1).cloned().unwrap_or_default();
+                i += 2;
+            }
+            "--tested" => {
+                tested_arg = args.get(i + 1).cloned().unwrap_or_default();
                 i += 2;
             }
             _ => i += 1,
@@ -171,14 +409,24 @@ fn main() {
             std::process::exit(1);
         }
     };
-    let changed: Vec<String> = changed_arg
-        .split(',')
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .collect();
+    let split = |arg: &str| -> Vec<String> {
+        arg.split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect()
+    };
+    let changed: Vec<String> = split(&changed_arg);
+    let tested: Vec<String> = split(&tested_arg);
 
     let report = analyze(&graph, &changed);
-    match serde_json::to_string_pretty(&report) {
+    let cut = min_test_cut(&graph, &changed, &tested);
+    let full = FullReport {
+        blast: report,
+        untested_count: cut.untested_count,
+        disjoint_untested_paths: cut.targets.len(),
+        minimum_test_set: cut.targets,
+    };
+    match serde_json::to_string_pretty(&full) {
         Ok(s) => println!("{s}"),
         Err(e) => {
             eprintln!("faultline-engine: failed to serialize report: {e}");
@@ -453,6 +701,260 @@ mod tests {
             }
             assert_eq!(report.impacted_count, expected.len());
             assert_eq!(report.max_depth, expected.values().copied().max().unwrap_or(0));
+        }
+    }
+
+    // ---- Phase 1: minimum-test-set (min-cut) tests ----
+
+    fn cut(g: &Graph, changed: &[&str], tested: &[&str]) -> CutResult {
+        let c: Vec<String> = changed.iter().map(|s| s.to_string()).collect();
+        let t: Vec<String> = tested.iter().map(|s| s.to_string()).collect();
+        min_test_cut(g, &c, &t)
+    }
+    fn target_names(r: &CutResult) -> Vec<String> {
+        let mut n: Vec<String> = r.targets.iter().map(|x| x.name.clone()).collect();
+        n.sort();
+        n
+    }
+
+    #[test]
+    fn cut_single_chain_one_target() {
+        // b calls a calls c ; change c => impacted {a,b}. Testing `a` intercepts the
+        // path to b AND covers a itself => minimum test set is {a}, not {a,b}.
+        let g = Graph {
+            nodes: vec![node("C", "c", "f"), node("A", "a", "f"), node("B", "b", "f")],
+            edges: vec![edge("A", "C"), edge("B", "A")],
+        };
+        let r = cut(&g, &["C"], &[]);
+        assert_eq!(target_names(&r), vec!["a".to_string()]);
+        assert_eq!(r.untested_count, 2);
+    }
+
+    #[test]
+    fn cut_two_disjoint_paths_need_two() {
+        // p and q both call c independently => two vertex-disjoint untested paths =>
+        // minimum test set is {p,q} (Menger dual = 2).
+        let g = Graph {
+            nodes: vec![node("C", "c", "f"), node("P", "p", "f"), node("Q", "q", "f")],
+            edges: vec![edge("P", "C"), edge("Q", "C")],
+        };
+        let r = cut(&g, &["C"], &[]);
+        assert_eq!(target_names(&r), vec!["p".to_string(), "q".to_string()]);
+    }
+
+    #[test]
+    fn cut_intermediate_intercepts_many() {
+        // x,y,z all call m calls c ; change c => impacted {m,x,y,z}. Testing the single
+        // choke point `m` intercepts all three downstream paths => minimum set {m}.
+        let g = Graph {
+            nodes: vec![
+                node("C", "c", "f"), node("M", "m", "f"),
+                node("X", "x", "f"), node("Y", "y", "f"), node("Z", "z", "f"),
+            ],
+            edges: vec![edge("M", "C"), edge("X", "M"), edge("Y", "M"), edge("Z", "M")],
+        };
+        let r = cut(&g, &["C"], &[]);
+        assert_eq!(target_names(&r), vec!["m".to_string()]);
+        assert_eq!(r.untested_count, 4); // m,x,y,z all untested...
+        assert_eq!(r.targets.len(), 1); // ...but ONE test gates them all
+    }
+
+    #[test]
+    fn cut_tested_node_is_a_free_interceptor() {
+        // Same graph, but `m` already has a test. Every path to x,y,z passes through the
+        // tested checkpoint m => the change is already gated => zero new tests needed,
+        // even though x,y,z are untested.
+        let g = Graph {
+            nodes: vec![
+                node("C", "c", "f"), node("M", "m", "f"),
+                node("X", "x", "f"), node("Y", "y", "f"), node("Z", "z", "f"),
+            ],
+            edges: vec![edge("M", "C"), edge("X", "M"), edge("Y", "M"), edge("Z", "M")],
+        };
+        let r = cut(&g, &["C"], &["M"]);
+        assert!(r.targets.is_empty(), "tested m should gate all downstream paths");
+        assert_eq!(r.untested_count, 3); // x,y,z
+    }
+
+    #[test]
+    fn cut_empty_when_nothing_untested() {
+        let g = Graph {
+            nodes: vec![node("C", "c", "f"), node("A", "a", "f"), node("B", "b", "f")],
+            edges: vec![edge("A", "C"), edge("B", "A")],
+        };
+        let r = cut(&g, &["C"], &["A", "B"]);
+        assert!(r.targets.is_empty());
+        assert_eq!(r.untested_count, 0);
+    }
+
+    #[test]
+    fn cut_self_edge_is_safe() {
+        // Orbit emits self-edges (Ruby `super`, Go embedding promotion). They must not
+        // change the cut. Same as cut_intermediate plus a self-edge on m.
+        let mut g = Graph {
+            nodes: vec![
+                node("C", "c", "f"), node("M", "m", "f"),
+                node("X", "x", "f"), node("Y", "y", "f"), node("Z", "z", "f"),
+            ],
+            edges: vec![edge("M", "C"), edge("X", "M"), edge("Y", "M"), edge("Z", "M")],
+        };
+        g.edges.push(edge("M", "M"));
+        let r = cut(&g, &["C"], &[]);
+        assert_eq!(target_names(&r), vec!["m".to_string()]);
+    }
+
+    #[test]
+    fn cut_is_deterministic_under_input_permutation() {
+        let mk = |rev: bool| -> Graph {
+            let mut nodes = vec![
+                node("C", "c", "f"), node("M", "m", "f"),
+                node("X", "x", "f"), node("Y", "y", "f"),
+            ];
+            let mut edges = vec![edge("M", "C"), edge("X", "M"), edge("Y", "M")];
+            if rev {
+                nodes.reverse();
+                edges.reverse();
+            }
+            Graph { nodes, edges }
+        };
+        assert_eq!(target_names(&cut(&mk(false), &["C"], &[])), target_names(&cut(&mk(true), &["C"], &[])));
+    }
+
+    // The guarantee: on random graphs, the returned cut must (a) actually SEPARATE the
+    // change from all untested impacted code, and (b) be of MINIMUM size — cross-checked
+    // against an independent brute-force vertex-cut oracle. This is the machine-checked
+    // proof that the "minimum test set" is provably minimal, not a greedy approximation.
+    #[test]
+    fn cut_is_minimal_and_valid_vs_bruteforce() {
+        let mut s: u64 = 0xD1B5_4A32_D192_ED03;
+        let mut rng = || {
+            s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            (s >> 33) as u32
+        };
+
+        // owned-string impact graph, matching min_test_cut's edge rules
+        fn build_imp(g: &Graph) -> HashMap<String, Vec<String>> {
+            let mut imp: HashMap<String, Vec<String>> = HashMap::new();
+            for e in &g.edges {
+                if matches!(e.etype.as_str(), "CALLS" | "EXTENDS" | "") && e.from != e.to {
+                    imp.entry(e.to.clone()).or_default().push(e.from.clone());
+                }
+            }
+            imp
+        }
+        // true iff NO untested sink is reachable from `changed` avoiding `removed`.
+        fn separates(
+            imp: &HashMap<String, Vec<String>>,
+            changed: &HashSet<String>,
+            sinks: &HashSet<String>,
+            removed: &HashSet<String>,
+        ) -> bool {
+            let mut seen: HashSet<String> = HashSet::new();
+            let mut q: VecDeque<String> = VecDeque::new();
+            for c in changed {
+                if !removed.contains(c) && seen.insert(c.clone()) {
+                    q.push_back(c.clone());
+                }
+            }
+            while let Some(cur) = q.pop_front() {
+                if sinks.contains(&cur) && !removed.contains(&cur) && !changed.contains(&cur) {
+                    return false;
+                }
+                if let Some(adj) = imp.get(&cur) {
+                    for nx in adj {
+                        if !removed.contains(nx) && seen.insert(nx.clone()) {
+                            q.push_back(nx.clone());
+                        }
+                    }
+                }
+            }
+            true
+        }
+
+        for _ in 0..300 {
+            let n = 2 + (rng() % 5) as usize; // 2..=6 nodes
+            let ids: Vec<String> = (0..n).map(|i| i.to_string()).collect();
+            let nodes: Vec<Node> = ids.iter().map(|id| node(id, &format!("n{id}"), "f")).collect();
+            let mut edges: Vec<Edge> = Vec::new();
+            for i in 0..n {
+                for j in 0..n {
+                    if i != j && rng() % 100 < 40 {
+                        edges.push(edge(&i.to_string(), &j.to_string()));
+                    }
+                }
+            }
+            let g = Graph { nodes, edges };
+            let changed: Vec<String> = ids.iter().filter(|_| rng() % 100 < 30).cloned().collect();
+            // tested = a random subset of the remaining nodes
+            let tested: Vec<String> = ids
+                .iter()
+                .filter(|id| !changed.contains(id))
+                .filter(|_| rng() % 100 < 30)
+                .cloned()
+                .collect();
+
+            let imp = build_imp(&g);
+            let changed_set: HashSet<String> = changed.iter().cloned().collect();
+            let tested_set: HashSet<String> = tested.iter().cloned().collect();
+
+            // impacted = reachable from changed in imp, excl. changed
+            let mut impacted: HashSet<String> = HashSet::new();
+            let mut seen: HashSet<String> = changed_set.clone();
+            let mut q: VecDeque<String> = changed.iter().cloned().collect();
+            while let Some(cur) = q.pop_front() {
+                if let Some(adj) = imp.get(&cur) {
+                    for nx in adj {
+                        if seen.insert(nx.clone()) {
+                            if !changed_set.contains(nx) {
+                                impacted.insert(nx.clone());
+                            }
+                            q.push_back(nx.clone());
+                        }
+                    }
+                }
+            }
+            let sinks: HashSet<String> =
+                impacted.iter().filter(|id| !tested_set.contains(*id)).cloned().collect();
+
+            let r = cut(&g, &changed.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
+                            &tested.iter().map(|s| s.as_str()).collect::<Vec<_>>());
+            let target_ids: HashSet<String> = r.targets.iter().map(|t| t.id.clone()).collect();
+
+            // (a) the algorithm's cut must actually separate.
+            let mut removed_alg = tested_set.clone();
+            removed_alg.extend(target_ids.iter().cloned());
+            assert!(
+                separates(&imp, &changed_set, &sinks, &removed_alg),
+                "returned cut does not separate: changed={changed:?} tested={tested:?} targets={:?}",
+                r.targets.iter().map(|t| &t.id).collect::<Vec<_>>()
+            );
+
+            // (b) minimum size, via brute force over subsets of untested-impacted nodes.
+            let cand: Vec<String> = {
+                let mut c: Vec<String> = sinks.iter().cloned().collect();
+                c.sort();
+                c
+            };
+            let mut best = usize::MAX;
+            for mask in 0u32..(1u32 << cand.len()) {
+                let subset: HashSet<String> = cand
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, _)| mask & (1 << i) != 0)
+                    .map(|(_, s)| s.clone())
+                    .collect();
+                let mut removed = tested_set.clone();
+                removed.extend(subset);
+                if separates(&imp, &changed_set, &sinks, &removed) {
+                    best = best.min(mask.count_ones() as usize);
+                }
+            }
+            assert_eq!(
+                r.targets.len(),
+                best,
+                "cut not minimum: got {} expected {best}; changed={changed:?} tested={tested:?}",
+                r.targets.len()
+            );
         }
     }
 }

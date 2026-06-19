@@ -86,11 +86,20 @@ type impacted struct {
 	Distance       int    `json:"distance"`
 }
 
+type cutNode struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	FilePath string `json:"file_path"`
+}
+
 type report struct {
-	Changed       []string   `json:"changed"`
-	ImpactedCount int        `json:"impacted_count"`
-	MaxDepth      int        `json:"max_depth"`
-	BlastRadius   []impacted `json:"blast_radius"`
+	Changed               []string   `json:"changed"`
+	ImpactedCount         int        `json:"impacted_count"`
+	MaxDepth              int        `json:"max_depth"`
+	BlastRadius           []impacted `json:"blast_radius"`
+	UntestedCount         int        `json:"untested_count"`
+	MinimumTestSet        []cutNode  `json:"minimum_test_set"`
+	DisjointUntestedPaths int        `json:"disjoint_untested_paths"`
 }
 
 // normalize merges the definitions + one or more edge query results (CALLS,
@@ -238,6 +247,24 @@ func untestedImpact(blast []impacted, testCorpus string) []impacted {
 		}
 	}
 	return out
+}
+
+// coveredDefIDs returns the ids of definitions whose name appears in the test
+// corpus (the same name-reference heuristic as untestedImpact). These are handed
+// to the engine as "tested" checkpoints — free interceptors for the minimum-test-set
+// cut, so a change already covered by a test needs no new one.
+func coveredDefIDs(nodes []gNode, testCorpus string) []string {
+	var ids []string
+	for _, n := range nodes {
+		if n.Name == "" {
+			continue
+		}
+		re := regexp.MustCompile(`\b` + regexp.QuoteMeta(n.Name) + `\b`)
+		if re.MatchString(testCorpus) {
+			ids = append(ids, n.ID)
+		}
+	}
+	return ids
 }
 
 // mermaidLabel sanitizes text for a mermaid ["..."] node label.
@@ -431,6 +458,21 @@ func renderMarkdown(r report, changedNames []string, untested []impacted) string
 			b.WriteString(fmt.Sprintf("- %s (%s)\n", mdCode(name), mdCell(file)))
 		}
 	}
+	if len(r.MinimumTestSet) > 0 {
+		b.WriteString(fmt.Sprintf("\n🔧 **Minimum test set — add a test at these %d definition(s) to gate the whole change** (vs %d untested):\n", len(r.MinimumTestSet), r.UntestedCount))
+		for _, t := range r.MinimumTestSet {
+			name := t.Name
+			if name == "" {
+				name = fmt.Sprintf("(unresolved #%s)", t.ID)
+			}
+			file := t.FilePath
+			if file == "" {
+				file = "—"
+			}
+			b.WriteString(fmt.Sprintf("- %s (%s)\n", mdCode(name), mdCell(file)))
+		}
+		b.WriteString("\n<sub>Provably minimal: a minimum vertex cut over the impact graph (Menger / max-flow) — testing these intercepts every known path from the change to untested code, fewer than a greedy set-cover.</sub>\n")
+	}
 	b.WriteString("\n<sub>Transitive reverse-`CALLS`/`EXTENDS` closure computed by the Faultline engine over GitLab Orbit's knowledge graph.</sub>\n")
 	return b.String()
 }
@@ -610,7 +652,18 @@ func main() {
 	data, _ := json.MarshalIndent(g, "", "  ")
 	fatal(os.WriteFile(graphPath, data, 0o644))
 
-	engineOut, err := exec.Command(*enginePath, "--graph", graphPath, "--changed", strings.Join(changed, ",")).Output()
+	// Coverage (read once): definitions whose name appears in a test file. Passed to
+	// the engine as tested checkpoints for the minimum-test-set cut, and reused below
+	// for the untested blast radius.
+	corpus := ""
+	if *repoRoot != "" {
+		corpus = readTestCorpus(*repoRoot)
+	}
+	testedIDs := coveredDefIDs(g.Nodes, corpus)
+
+	engineOut, err := exec.Command(*enginePath, "--graph", graphPath,
+		"--changed", strings.Join(changed, ","),
+		"--tested", strings.Join(testedIDs, ",")).Output()
 	if err != nil {
 		if ee, ok := err.(*exec.ExitError); ok {
 			fatal(fmt.Errorf("engine failed: %v: %s", err, strings.TrimSpace(string(ee.Stderr))))
@@ -642,7 +695,7 @@ func main() {
 	// Untested blast radius: which transitively-impacted symbols no test covers.
 	var untested []impacted
 	if *repoRoot != "" {
-		untested = untestedImpact(rep.BlastRadius, readTestCorpus(*repoRoot))
+		untested = untestedImpact(rep.BlastRadius, corpus)
 	}
 
 	md := renderMarkdown(rep, changedNames, untested)

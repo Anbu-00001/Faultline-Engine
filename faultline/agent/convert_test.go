@@ -355,3 +355,43 @@ func TestEdgeQueriesAreValidAndOneHop(t *testing.T) {
 		}
 	}
 }
+
+func TestCoveredDefIDs(t *testing.T) {
+	nodes := []gNode{
+		{ID: "1", Name: "CalculateTax"},
+		{ID: "2", Name: "InvoiceTotal"},
+		{ID: "3", Name: ""}, // unnamed nodes are skipped
+	}
+	corpus := "func TestCalculateTax(t *testing.T){ CalculateTax(100) }\n"
+	got := coveredDefIDs(nodes, corpus)
+	if len(got) != 1 || got[0] != "1" {
+		t.Fatalf("expected only CalculateTax (id 1) covered, got %v", got)
+	}
+	if len(coveredDefIDs(nodes, "")) != 0 {
+		t.Errorf("empty corpus must cover nothing")
+	}
+}
+
+func TestRenderMarkdownShowsMinimumTestSet(t *testing.T) {
+	// 4 untested impacted, but the engine's min-cut says one test gates them all.
+	r := report{
+		ImpactedCount: 4, MaxDepth: 2,
+		BlastRadius:    []impacted{{Name: "CalculateTax", Distance: 1}},
+		UntestedCount:  4,
+		MinimumTestSet: []cutNode{{ID: "M", Name: "CalculateTax", FilePath: "calc/tax.rb"}},
+	}
+	md := renderMarkdown(r, []string{"standardRate"}, nil)
+	if !strings.Contains(md, "Minimum test set") || !strings.Contains(md, "these 1 definition") {
+		t.Errorf("expected minimum-test-set section, got:\n%s", md)
+	}
+	if !strings.Contains(md, "vs 4 untested") {
+		t.Errorf("expected 'vs 4 untested' framing, got:\n%s", md)
+	}
+	if !strings.Contains(md, "minimum vertex cut") {
+		t.Errorf("expected the provably-minimal attribution, got:\n%s", md)
+	}
+	// when there is no cut, the section must be absent.
+	if strings.Contains(renderMarkdown(report{ImpactedCount: 1, BlastRadius: []impacted{{Name: "X"}}}, nil, nil), "Minimum test set") {
+		t.Errorf("min-test-set section must not render when empty")
+	}
+}
