@@ -131,10 +131,20 @@ reads as *correct*, not broken:
 - **Attribution is exact for ≤ 20 changed symbols.** Beyond that the Shapley value is
   estimated by deterministic permutation sampling and the verdict is explicitly marked
   *approximate* (`risk_attribution_exact: false`) — never a falsely-exact number.
-- **Code graph only.** Faultline stays on Orbit's verified `CALLS`/`EXTENDS` code
-  edges. It does not claim cross-domain graph joins that Orbit's schema does not
-  support (e.g. `OWNER` is `User→Group` only; security findings store file location
-  as a property, not an edge) — those would be overclaims.
+- **Code graph only (on Orbit).** Faultline's *graph* computation stays on Orbit's
+  verified `CALLS`/`EXTENDS` edges. It does not fake cross-domain graph joins Orbit's
+  schema can't support — `OWNER` is `User→Group` only, and security findings store
+  file location as a property, not an edge.
+- **Ownership is a CODEOWNERS file join, not an Orbit edge.** Because Orbit has no
+  code-ownership edge, the "Code owners beyond the diff" section reads the project's
+  real **CODEOWNERS** file — GitLab's own mechanism — and maps owners onto the blast
+  radius (last-match precedence, sections, and the common gitignore glob subset,
+  tested in `agent/codeowners_test.go`). This is a labeled property-level join over a
+  first-class GitLab artifact, deliberately *not* presented as an Orbit graph edge.
+- **The Duo closed loop drafts, it does not decide.** When the gate finds an untested
+  blast radius it can hand the minimum test set to a Duo flow (GitLab's documented
+  mention trigger). The flow opens a **draft** MR a human must approve; no model is in
+  the verdict's compute path and the gate never auto-merges (see `CLOSED_LOOP.md`).
 
 ## Why deterministic beats an LLM here
 

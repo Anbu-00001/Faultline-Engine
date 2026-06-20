@@ -781,10 +781,12 @@ func main() {
 	var rep report
 	fatal(json.Unmarshal(engineOut, &rep))
 
-	// Map changed IDs back to human-readable names for the verdict.
+	// Map changed IDs back to human-readable names + files for the verdict.
 	nameByID := map[string]string{}
+	fileByID := map[string]string{}
 	for _, n := range g.Nodes {
 		nameByID[n.ID] = n.Name
+		fileByID[n.ID] = n.FilePath
 	}
 	var changedNames []string
 	for _, id := range changed {
@@ -802,6 +804,24 @@ func main() {
 	}
 
 	md := renderMarkdown(rep, changedNames, untested)
+
+	// Governance: map the project's CODEOWNERS onto the blast radius — owners of
+	// impacted-but-unchanged files that GitLab's diff-only Code Owners would miss.
+	if *repoRoot != "" {
+		changedFileSet := map[string]bool{}
+		for _, id := range changed {
+			if fp := fileByID[id]; fp != "" {
+				changedFileSet[fp] = true
+			}
+		}
+		for _, f := range splitNonEmpty(*changedFiles) {
+			changedFileSet[f] = true
+		}
+		md += ownershipReach(*repoRoot, rep.BlastRadius, changedFileSet)
+	}
+	// Closed-loop hand-off: the minimum test set is the exact goal for a Duo flow.
+	md += duoHandoff(rep.MinimumTestSet)
+
 	if mer := buildMermaid(g, changed, rep, untested); mer != "" {
 		// Insert the blast-radius diagram just above the attribution footer.
 		md = strings.Replace(md, "\n<sub>Transitive", "\n"+mer+"\n<sub>Transitive", 1)

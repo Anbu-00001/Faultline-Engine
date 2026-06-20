@@ -4,7 +4,7 @@
 
 > Orbit can *describe* a change's blast radius. **Faultline makes Orbit *enforce* it** — Code Owners for the blast radius, not the diff.
 
-**56 deterministic tests** · Rust engine: 28 example + **3 property tests proving the closure is complete, the minimum test set is provably minimal, and the Shapley risk split is exact** · Go agent: 25 · **polyglot (Go + Python + Ruby), verified end-to-end** · runs as a GitLab CI gate · [why it's correct →](CORRECTNESS.md)
+**62 deterministic tests** · Rust engine: 28 example + **3 property tests proving the closure is complete, the minimum test set is provably minimal, and the Shapley risk split is exact** · Go agent: 31 · **polyglot (Go + Python + Ruby) + CODEOWNERS governance + Duo closed loop** · runs as a GitLab CI gate · [why it's correct →](CORRECTNESS.md)
 
 Faultline computes the **full transitive set of callers** ("blast radius") of the symbols changed in a merge request, intersects it with the impacted code that **lacks test coverage**, and **fails the pipeline (blocks the merge)** when an untested blast radius is found. A green-looking one-line helper change that silently reaches deep, untested code becomes a *blocked* MR with an explained verdict.
 
@@ -42,8 +42,10 @@ Beyond flagging the gap, Faultline **prescribes the fix**:
 
 - **Minimum test set** — a *provably-minimal* vertex cut (Even node-splitting → max-flow / min-cut, Menger) giving the **fewest** definitions to add a test at to gate the *entire* change. One well-placed test often intercepts many untested paths, so the verdict says "test these **K**, not all **N**" — beating a greedy set-cover, machine-checked against a brute-force oracle.
 - **Untested-risk attribution** — an **exact Shapley value** per changed symbol ("which change owns the gap": `parseConfig` owns 66%, `loadEnv` 34%). Overlapping blast radii are split fairly, not double-counted; the shares sum to the true untested total (efficiency axiom), verified against the textbook permutation definition.
+- **Code owners beyond the diff** — Faultline reads the project's real **CODEOWNERS** file and maps it onto the *blast radius*, surfacing owners of impacted-but-unchanged files that GitLab's diff-only Code Owners approval would never pull in. *Code Owners for the blast radius, not the diff* — the literal promise, enforced (last-match precedence, sections, and the gitignore glob subset, all tested).
+- **Closed loop with GitLab Duo** — the minimum test set is the exact goal to hand to an agent, so the verdict @-mentions a Duo flow (GitLab's documented trigger) to open a **draft** MR adding that test; a human still approves and the gate never auto-merges. See **[CLOSED_LOOP.md](CLOSED_LOOP.md)**.
 
-Both are deterministic pure functions of the graph — no model in the compute path.
+The first three are deterministic pure functions of the graph — no model in the compute path; the fourth hands off to a model but only to *draft*, never to decide.
 
 ## Would it catch real bugs?
 
@@ -67,7 +69,7 @@ This is proven, not asserted:
 | Component | Role | Tests |
 |---|---|---|
 | **Rust engine** (`engine/`) | Pure, deterministic BFS over reverse-`CALLS`/`EXTENDS` edges → the complete transitive caller set with shortest-caller distances (`O(V+E)`, cycle-safe), **plus the provably-minimal minimum test set (min vertex cut) and exact Shapley untested-risk attribution**. | 31 |
-| **Go agent** (`agent/`) | Pulls Definitions + 1-hop `CALLS`/`EXTENDS` edges from Orbit (`POST /api/v4/orbit/query`), normalizes, runs the engine, scans the checked-out repo for tests of impacted symbols, renders the Markdown verdict (blast radius, minimum test set, Shapley attribution) + mermaid + a self-contained interactive HTML graph, posts it to the MR, and exits non-zero to gate. | 25 |
+| **Go agent** (`agent/`) | Pulls Definitions + 1-hop `CALLS`/`EXTENDS` edges from Orbit (`POST /api/v4/orbit/query`), normalizes, runs the engine, scans the checked-out repo for tests of impacted symbols, renders the Markdown verdict (blast radius, minimum test set, Shapley attribution, **CODEOWNERS owners beyond the diff**, **Duo closed-loop hand-off**) + mermaid + a self-contained interactive HTML graph, posts it to the MR, and exits non-zero to gate. | 31 |
 
 Runs as a GitLab CI job on `merge_request_event`. A companion **declarative GitLab Duo agent** (`agents/faultline-impact-reviewer.yml`) is published to the **AI Catalog** as the always-on, in-platform front door (see `CATALOG.md`).
 
@@ -95,19 +97,20 @@ The job pulls the call graph from Orbit for the MR's changed files, computes the
 | `FAULTLINE_QUERY_LIMIT` | `1000` | Rows per Orbit query; if a query hits the cap the verdict warns it may be partial (never silent). |
 | `FAULTLINE_TEST_PATTERNS` | unset | Comma-separated extra test-file suffixes/path fragments (e.g. `.bats,/it/`) for non-standard conventions. |
 | `FAULTLINE_HTTP_TIMEOUT_SEC` | `30` | Per-request timeout for Orbit/GitLab calls. |
+| `FAULTLINE_DUO_FLOW` | unset | Duo flow service-account handle to @-mention for the closed-loop test hand-off (see [CLOSED_LOOP.md](CLOSED_LOOP.md)). Unset → the hand-off renders as guidance, never a fake mention. |
 
 ## Run the tests
 
 ```console
 $ (cd engine && cargo test)   # 31 passed (incl. 3 property tests + language-blind closure) — closure, min-cut, Shapley
-$ (cd agent  && go test ./...) # 25 passed — normalize, render, gate, mermaid, interactive graph, polyglot E2E, config
+$ (cd agent  && go test ./...) # 31 passed — normalize, render, gate, mermaid, interactive graph, polyglot E2E, CODEOWNERS governance, Duo hand-off
 ```
 
 ## Honesty boundaries (by design)
 
 - **Orbit indexes the default branch.** Faultline traces callers of *modified existing* symbols; a brand-new symbol that exists only on the branch correctly shows an empty radius (not a false alarm).
 - **Coverage is a conservative name-reference heuristic** (word-boundary match in test files), not execution coverage. It errs toward flagging. Ingesting `lcov`/`cobertura` is the planned next step.
-- **Cross-domain:** Orbit's `OWNER` edge is `User→Group` only (no code-ownership edge), and security findings carry file location as a property, not an edge — so Faultline deliberately stays on the verified `CALLS`/`EXTENDS` code graph rather than overclaiming cross-domain joins.
+- **Cross-domain (the honest version):** Orbit's `OWNER` edge is `User→Group` only and security findings store file location as a property, not an edge — so Faultline does **not** fake a security→code or owner→code *graph join*. For ownership it instead reads the project's real **CODEOWNERS** file (a separate, first-class GitLab mechanism) and maps it onto the blast radius — a clearly-labeled property-level join, not an invented Orbit edge. Security/deploy joins stay out of scope rather than overclaimed.
 
 ## License
 
