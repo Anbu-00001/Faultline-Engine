@@ -5,7 +5,7 @@
 ### Transitive change-impact governance for GitLab merge requests — built on [GitLab Orbit](https://about.gitlab.com/gitlab-orbit/).
 
 ![License: MIT](https://img.shields.io/badge/License-MIT-success.svg)
-![tests](https://img.shields.io/badge/tests-28%20passing-brightgreen)
+![tests](https://img.shields.io/badge/tests-56%20passing-brightgreen)
 ![engine](https://img.shields.io/badge/engine-Rust-orange)
 ![agent](https://img.shields.io/badge/agent-Go-00ADD8)
 ![built on](https://img.shields.io/badge/built%20on-GitLab%20Orbit-FC6D26)
@@ -110,7 +110,7 @@ graph BT
 A gate that blocks merges must be **complete** and **deterministic**. Faultline is both, and it's proven:
 
 - **A property test** (`analyze_matches_naive_reachability_on_random_graphs`) cross-checks the engine against an *independent* naive reachability oracle over **400 random graphs** — a machine-checked proof that the closure is the complete set, not a heuristic subset.
-- **28 deterministic tests total** (Rust engine: 13 example + 1 property · Go agent: 14). See [`faultline/CORRECTNESS.md`](faultline/CORRECTNESS.md) for the invariant, determinism guarantees, complexity, and honest limitations.
+- **56 deterministic tests total** (Rust engine: 28 example + 3 property · Go agent: 25). See [`faultline/CORRECTNESS.md`](faultline/CORRECTNESS.md) for the invariant, determinism guarantees, complexity, and honest limitations.
 
 ## Install (one CI job)
 
@@ -121,8 +121,8 @@ include:
 ```
 
 ```console
-$ (cd faultline/engine && cargo test)   # 14 passed
-$ (cd faultline/agent  && go test ./...) # 14 passed
+$ (cd faultline/engine && cargo test)   # 31 passed
+$ (cd faultline/agent  && go test ./...) # 25 passed
 ```
 
 ## This repository

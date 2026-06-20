@@ -267,8 +267,18 @@ func isTestFile(name string, extraPatterns ...string) bool {
 			return true
 		}
 	}
-	return strings.Contains(name, "/test/") || strings.Contains(name, "/tests/") ||
-		strings.Contains(name, "/spec/") || strings.Contains(name, "/__tests__/")
+	// Directory-based conventions: any path *component* that is a conventional
+	// test directory. Component matching (vs a "/spec/" substring) catches a
+	// leading "spec/foo_helper.rb" too, and does NOT trip on "apispec/" or
+	// "latest/" — a false positive there would count a source file as coverage
+	// and silently hide a real gap.
+	for _, part := range strings.Split(filepath.ToSlash(name), "/") {
+		switch part {
+		case "test", "tests", "spec", "__tests__":
+			return true
+		}
+	}
+	return false
 }
 
 // readTestCorpus concatenates the contents of every test file under root.

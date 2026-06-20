@@ -814,6 +814,65 @@ mod tests {
     }
 
     #[test]
+    fn closure_is_language_blind_across_go_python_ruby() {
+        // Phase 4 — polyglot. One graph mixing Go, Python and Ruby, each with the
+        // same shape (base <- standard <- invoice). Changing all three base
+        // symbols impacts all three standard+invoice symbols: the engine treats
+        // every language identically because it operates on opaque IDs, never on
+        // file types. The agent's end-to-end test runs this same shape through the
+        // real binary; this pins the property in the engine's own suite, always-on.
+        let mk = |fgo: &str, fpy: &str, frb: &str| Graph {
+            nodes: vec![
+                node("g_base", "RateGo", fgo),
+                node("g_std", "StdGo", fgo),
+                node("g_inv", "InvGo", fgo),
+                node("p_base", "rate_py", fpy),
+                node("p_std", "std_py", fpy),
+                node("p_inv", "inv_py", fpy),
+                node("r_base", "rate_rb", frb),
+                node("r_std", "std_rb", frb),
+                node("r_inv", "inv_rb", frb),
+            ],
+            edges: vec![
+                edge("g_std", "g_base"),
+                edge("g_inv", "g_std"),
+                edge("p_std", "p_base"),
+                edge("p_inv", "p_std"),
+                edge("r_std", "r_base"),
+                edge("r_inv", "r_std"),
+            ],
+        };
+        let changed = vec!["g_base".to_string(), "p_base".to_string(), "r_base".to_string()];
+
+        let g = mk("rates.go", "rates.py", "rates.rb");
+        let r = analyze(&g, &changed);
+        assert_eq!(r.impacted_count, 6); // std + invoice, per language
+        assert_eq!(r.max_depth, 2); // base -> standard -> invoice
+        let files: std::collections::HashSet<&str> =
+            r.blast_radius.iter().map(|x| x.file_path.as_str()).collect();
+        assert!(
+            files.contains("rates.go") && files.contains("rates.py") && files.contains("rates.rb"),
+            "blast radius must span all three languages: {files:?}"
+        );
+
+        // Language-blindness: the same topology with every file collapsed to one
+        // extension must yield a byte-identical impacted (id, distance) set —
+        // proving file_path/extension never influences the graph computation.
+        let same = mk("x.rs", "x.rs", "x.rs");
+        let ids = |rep: &Report| -> Vec<(String, u32)> {
+            let mut v: Vec<(String, u32)> =
+                rep.blast_radius.iter().map(|x| (x.id.clone(), x.distance)).collect();
+            v.sort();
+            v
+        };
+        assert_eq!(
+            ids(&r),
+            ids(&analyze(&same, &changed)),
+            "closure must be identical regardless of language"
+        );
+    }
+
+    #[test]
     fn duplicate_edges_do_not_double_count() {
         let mut g = sample();
         g.edges.push(edge("C", "A"));
