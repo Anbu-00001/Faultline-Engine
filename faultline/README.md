@@ -4,7 +4,7 @@
 
 > Orbit can *describe* a change's blast radius. **Faultline makes Orbit *enforce* it** — Code Owners for the blast radius, not the diff.
 
-**28 deterministic tests** · Rust engine: 13 example + **1 property test that proves the closure is complete** · Go agent: 14 · runs as a GitLab CI gate · [why it's correct →](CORRECTNESS.md)
+**47 deterministic tests** · Rust engine: 27 example + **3 property tests proving the closure is complete, the minimum test set is provably minimal, and the Shapley risk split is exact** · Go agent: 17 · runs as a GitLab CI gate · [why it's correct →](CORRECTNESS.md)
 
 Faultline computes the **full transitive set of callers** ("blast radius") of the symbols changed in a merge request, intersects it with the impacted code that **lacks test coverage**, and **fails the pipeline (blocks the merge)** when an untested blast radius is found. A green-looking one-line helper change that silently reaches deep, untested code becomes a *blocked* MR with an explained verdict.
 
@@ -38,12 +38,19 @@ On [a real MR that raises a tax rate by one line](https://gitlab.com/anbuchelvan
 
 It also renders a **mermaid** diagram of the blast subgraph (changed = blue, untested = red).
 
+Beyond flagging the gap, Faultline **prescribes the fix**:
+
+- **Minimum test set** — a *provably-minimal* vertex cut (Even node-splitting → max-flow / min-cut, Menger) giving the **fewest** definitions to add a test at to gate the *entire* change. One well-placed test often intercepts many untested paths, so the verdict says "test these **K**, not all **N**" — beating a greedy set-cover, machine-checked against a brute-force oracle.
+- **Untested-risk attribution** — an **exact Shapley value** per changed symbol ("which change owns the gap": `parseConfig` owns 66%, `loadEnv` 34%). Overlapping blast radii are split fairly, not double-counted; the shares sum to the true untested total (efficiency axiom), verified against the textbook permutation definition.
+
+Both are deterministic pure functions of the graph — no model in the compute path.
+
 ## Architecture
 
 | Component | Role | Tests |
 |---|---|---|
-| **Rust engine** (`engine/`) | Pure, deterministic BFS over reverse-`CALLS`/`EXTENDS` edges → the complete transitive caller set with shortest-caller distances. `O(V+E)`, cycle-safe. | 14 |
-| **Go agent** (`agent/`) | Pulls Definitions + 1-hop `CALLS`/`EXTENDS` edges from Orbit (`POST /api/v4/orbit/query`), normalizes, runs the engine, scans the checked-out repo for tests of impacted symbols, renders the Markdown verdict + mermaid, posts it to the MR, and exits non-zero to gate. | 14 |
+| **Rust engine** (`engine/`) | Pure, deterministic BFS over reverse-`CALLS`/`EXTENDS` edges → the complete transitive caller set with shortest-caller distances (`O(V+E)`, cycle-safe), **plus the provably-minimal minimum test set (min vertex cut) and exact Shapley untested-risk attribution**. | 30 |
+| **Go agent** (`agent/`) | Pulls Definitions + 1-hop `CALLS`/`EXTENDS` edges from Orbit (`POST /api/v4/orbit/query`), normalizes, runs the engine, scans the checked-out repo for tests of impacted symbols, renders the Markdown verdict (blast radius, minimum test set, Shapley attribution) + mermaid, posts it to the MR, and exits non-zero to gate. | 17 |
 
 Runs as a GitLab CI job on `merge_request_event`. A companion **declarative GitLab Duo agent** (`agents/faultline-impact-reviewer.yml`) is published to the **AI Catalog** as the always-on, in-platform front door (see `CATALOG.md`).
 
@@ -61,13 +68,13 @@ include:
   - remote: 'https://gitlab.com/anbuchelvanganesan.cse2024-group/faultline/-/raw/main/ci/faultline-gate.yml'
 ```
 
-The job pulls the call graph from Orbit for the MR's changed files, computes the blast radius, posts the verdict, and fails when untested-impacted symbols exceed the threshold (`--gate-untested`, default `0`).
+The job pulls the call graph from Orbit for the MR's changed files, computes the blast radius, and posts the verdict. **Gating is opt-in**: by default the job is comment-only (it never blocks a merge on first adoption). Set a `FAULTLINE_GATE` CI/CD variable to a number `N` to fail the pipeline when more than `N` untested-impacted symbols are found (`FAULTLINE_GATE=0` is zero-tolerance).
 
 ## Run the tests
 
 ```console
-$ (cd engine && cargo test)   # 14 passed (incl. property test) — deterministic engine
-$ (cd agent  && go test ./...) # 14 passed — normalize, render, gate, mermaid, query contract
+$ (cd engine && cargo test)   # 30 passed (incl. 3 property tests) — closure, min-cut, Shapley
+$ (cd agent  && go test ./...) # 17 passed — normalize, render, gate, mermaid, query contract
 ```
 
 ## Honesty boundaries (by design)

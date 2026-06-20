@@ -92,15 +92,31 @@ type cutNode struct {
 	FilePath string `json:"file_path"`
 }
 
-type report struct {
-	Changed               []string   `json:"changed"`
-	ImpactedCount         int        `json:"impacted_count"`
-	MaxDepth              int        `json:"max_depth"`
-	BlastRadius           []impacted `json:"blast_radius"`
-	UntestedCount         int        `json:"untested_count"`
-	MinimumTestSet        []cutNode  `json:"minimum_test_set"`
-	DisjointUntestedPaths int        `json:"disjoint_untested_paths"`
+type riskShare struct {
+	ID       string  `json:"id"`
+	Name     string  `json:"name"`
+	FilePath string  `json:"file_path"`
+	Shapley  float64 `json:"shapley"`
+	SharePct float64 `json:"share_pct"`
 }
+
+type report struct {
+	Changed               []string    `json:"changed"`
+	ImpactedCount         int         `json:"impacted_count"`
+	MaxDepth              int         `json:"max_depth"`
+	BlastRadius           []impacted  `json:"blast_radius"`
+	UntestedCount         int         `json:"untested_count"`
+	MinimumTestSet        []cutNode   `json:"minimum_test_set"`
+	DisjointUntestedPaths int         `json:"disjoint_untested_paths"`
+	RiskAttribution       []riskShare `json:"risk_attribution"`
+	RiskAttributionExact  bool        `json:"risk_attribution_exact"`
+}
+
+// orbitMaxHops is GitLab Orbit's hard query-DSL cap (max_hops ≤ 3). It is the moat:
+// any single Orbit query reaches at most this depth, so impact ≥ orbitMaxHops+1 hops
+// away is invisible to the API and only Faultline's client-side closure finds it.
+// One named home so the boundary can't drift across call sites (audit M3).
+const orbitMaxHops = 3
 
 // normalize merges the definitions + one or more edge query results (CALLS,
 // EXTENDS) into one deduped graph. Variadic over edge responses so callers can
@@ -377,20 +393,20 @@ func recipeComparison(r report) string {
 	var beyond []impacted
 	within := 0
 	for _, it := range r.BlastRadius {
-		if it.Distance >= 4 {
+		if it.Distance > orbitMaxHops {
 			beyond = append(beyond, it)
 		} else {
 			within++
 		}
 	}
 	if len(beyond) == 0 {
-		return "" // entirely within Orbit's 3-hop reach — no moat to claim
+		return "" // entirely within Orbit's reach — no moat to claim
 	}
 	var b strings.Builder
-	b.WriteString("\n**🔭 Orbit 3-hop query vs Faultline closure**\n")
+	b.WriteString(fmt.Sprintf("\n**🔭 Orbit %d-hop query vs Faultline closure**\n", orbitMaxHops))
 	b.WriteString(fmt.Sprintf(
-		"Orbit's query DSL is hard-capped at 3 hops (`max_hops` ≤ 3). A native reverse-`CALLS` query therefore reaches at most **%d of %d** impacted definition(s); the other **%d** sit ≥ 4 hops from the change and are invisible to *any* single Orbit query. Faultline computes the full closure and surfaces them:\n",
-		within, r.ImpactedCount, len(beyond)))
+		"Orbit's query DSL is hard-capped at %d hops (`max_hops` ≤ %d). A native reverse-`CALLS` query therefore reaches at most **%d of %d** impacted definition(s); the other **%d** sit ≥ %d hops from the change and are invisible to *any* single Orbit query. Faultline computes the full closure and surfaces them:\n",
+		orbitMaxHops, orbitMaxHops, within, r.ImpactedCount, len(beyond), orbitMaxHops+1))
 	for _, it := range beyond {
 		name := it.Name
 		if name == "" {
@@ -426,8 +442,8 @@ func renderMarkdown(r report, changedNames []string, untested []impacted) string
 		return b.String()
 	}
 	b.WriteString(fmt.Sprintf("⚠️ **%d definition(s) transitively affected** — max depth **%d**", r.ImpactedCount, r.MaxDepth))
-	if r.MaxDepth > 3 {
-		b.WriteString(", beyond Orbit's 3-hop query cap")
+	if r.MaxDepth > orbitMaxHops {
+		b.WriteString(fmt.Sprintf(", beyond Orbit's %d-hop query cap", orbitMaxHops))
 	}
 	b.WriteString(".\n\n| Impacted definition | File | Caller distance |\n|---|---|---|\n")
 	for _, it := range r.BlastRadius {
@@ -471,7 +487,26 @@ func renderMarkdown(r report, changedNames []string, untested []impacted) string
 			}
 			b.WriteString(fmt.Sprintf("- %s (%s)\n", mdCode(name), mdCell(file)))
 		}
-		b.WriteString("\n<sub>Provably minimal: a minimum vertex cut over the impact graph (Menger / max-flow) — testing these intercepts every known path from the change to untested code, fewer than a greedy set-cover.</sub>\n")
+		b.WriteString("\n<sub>Provably minimal: a minimum vertex cut over the impact graph (Menger / max-flow) — testing these intercepts every known path from the change to untested code, fewer than a greedy set-cover. Coverage is inferred from test-name references (a heuristic), so the cut is minimal with respect to that signal.</sub>\n")
+	}
+	if len(r.RiskAttribution) >= 2 {
+		b.WriteString("\n📊 **Untested-risk attribution — which changed symbol owns the gap")
+		if !r.RiskAttributionExact {
+			b.WriteString(" (approximate)")
+		}
+		b.WriteString(":**\n")
+		for _, s := range r.RiskAttribution {
+			name := s.Name
+			if name == "" {
+				name = fmt.Sprintf("(unresolved #%s)", s.ID)
+			}
+			file := s.FilePath
+			if file == "" {
+				file = "—"
+			}
+			b.WriteString(fmt.Sprintf("- %s (%s) — **%.0f%%** (≈%.1f untested def(s))\n", mdCode(name), mdCell(file), s.SharePct, s.Shapley))
+		}
+		b.WriteString("\n<sub>Exact Shapley value over the untested-impact coverage function: each changed symbol's average marginal contribution across all coalitions. Shares sum to the total untested count, so shared downstream impact is split fairly, not double-counted.</sub>\n")
 	}
 	b.WriteString("\n<sub>Transitive reverse-`CALLS`/`EXTENDS` closure computed by the Faultline engine over GitLab Orbit's knowledge graph.</sub>\n")
 	return b.String()

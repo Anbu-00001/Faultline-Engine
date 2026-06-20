@@ -29,6 +29,45 @@ The 11 example-based tests cover the named cases: transitivity, cycles, self-loo
 diamonds (shared caller counted once), depth > 3, multi-root union, duplicate
 edges, and empty/missing inputs.
 
+## The minimum-test-set guarantee (provably minimal)
+
+When impacted code is untested, Faultline prescribes the *fewest* definitions to add a
+test at so that **every** known path from the change to untested code is intercepted.
+This is a minimum s–t **vertex cut**: changed symbols are the source, untested symbols
+the sink, already-tested symbols are free interceptors (capacity 0), and every other
+impacted symbol costs 1. By **Even's node-splitting** reduction it becomes a max-flow /
+min-cut (Menger 1927; Ford–Fulkerson 1956), so the returned set is the smallest
+possible — strictly stronger than the greedy set-cover other tools ship.
+
+**Invariant:** `min_test_cut` returns a set that (a) *separates* the change from all
+untested impacted code and (b) is of **minimum** cardinality.
+
+**How it's enforced:** `cut_is_minimal_and_valid_vs_bruteforce` (`engine/src/main.rs`)
+generates 300 random graphs and checks the returned cut against an **independent
+brute-force vertex-cut oracle** — it must both separate (no untested sink remains
+reachable once the cut is removed) *and* equal the true minimum size over all subsets.
+Construction inputs are sorted, so the chosen minimum cut is canonical (reproducible),
+not just *a* minimum cut.
+
+## The risk-attribution guarantee (exact Shapley)
+
+When several symbols change together their blast radii overlap, so a naive per-symbol
+untested count double-counts shared downstream code. Faultline attributes the untested
+risk with the **Shapley value** over the coverage function `v(S)` = number of untested
+definitions reachable from coalition `S`. This is the unique attribution that is
+*efficient* (the shares sum to the true untested total), *symmetric*, and respects the
+*null player* (a symbol that reaches no untested code gets exactly zero).
+
+**Invariant:** `shapley_risk` returns each changed symbol's exact Shapley value — by
+coalition enumeration for up to 20 changed symbols, with integer `n!`-scaled arithmetic
+so there is no floating-point drift in the values.
+
+**How it's enforced:** `shapley_matches_permutation_definition_and_is_efficient`
+compares the engine's values, over random graphs, to the textbook permutation-average
+**definition** (averaged over all orderings), asserting they match symbol-for-symbol
+and that the shares sum to the true untested total. Sorted inputs make the ranking
+reproducible.
+
 ## Determinism guarantees
 
 The verdict is a **pure function** of `(graph, changed set)` — there is no model,
@@ -60,7 +99,11 @@ reads as *correct*, not broken:
 - **Coverage is a conservative name-reference heuristic.** "Untested" means an
   impacted symbol's name does not appear (word-boundary match) in any test file —
   not execution coverage. It errs toward flagging. Ingesting `lcov`/`cobertura` is
-  the planned next step.
+  the planned next step. The minimum test set is therefore *provably minimal with
+  respect to this coverage signal* — the math is exact; its input is a heuristic.
+- **Attribution is exact for ≤ 20 changed symbols.** Beyond that the Shapley value is
+  estimated by deterministic permutation sampling and the verdict is explicitly marked
+  *approximate* (`risk_attribution_exact: false`) — never a falsely-exact number.
 - **Code graph only.** Faultline stays on Orbit's verified `CALLS`/`EXTENDS` code
   edges. It does not claim cross-domain graph joins that Orbit's schema does not
   support (e.g. `OWNER` is `User→Group` only; security findings store file location

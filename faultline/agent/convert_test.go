@@ -395,3 +395,42 @@ func TestRenderMarkdownShowsMinimumTestSet(t *testing.T) {
 		t.Errorf("min-test-set section must not render when empty")
 	}
 }
+
+func TestRenderMarkdownShowsRiskAttribution(t *testing.T) {
+	r := report{
+		ImpactedCount: 3, MaxDepth: 2,
+		BlastRadius:   []impacted{{Name: "startServer", Distance: 1}},
+		UntestedCount: 3,
+		RiskAttribution: []riskShare{
+			{ID: "P", Name: "parseConfig", FilePath: "cfg.go", Shapley: 2.0, SharePct: 66.7},
+			{ID: "Q", Name: "loadEnv", FilePath: "cfg.go", Shapley: 1.0, SharePct: 33.3},
+		},
+		RiskAttributionExact: true,
+	}
+	md := renderMarkdown(r, []string{"parseConfig", "loadEnv"}, nil)
+	if !strings.Contains(md, "Untested-risk attribution") {
+		t.Fatalf("risk-attribution section missing:\n%s", md)
+	}
+	if !strings.Contains(md, "`parseConfig`") || !strings.Contains(md, "67%") {
+		t.Fatalf("top owner + rounded percentage not shown:\n%s", md)
+	}
+	if !strings.Contains(md, "Shapley value") {
+		t.Fatalf("expected the Shapley attribution note:\n%s", md)
+	}
+	if strings.Contains(md, "(approximate)") {
+		t.Fatalf("exact attribution must NOT be labeled approximate:\n%s", md)
+	}
+
+	// A single changed symbol owns 100% trivially — that's noise, so it must be hidden.
+	one := report{ImpactedCount: 1, BlastRadius: []impacted{{Name: "X"}},
+		RiskAttribution: []riskShare{{ID: "P", Name: "p", Shapley: 1, SharePct: 100}}}
+	if strings.Contains(renderMarkdown(one, nil, nil), "Untested-risk attribution") {
+		t.Errorf("attribution must be hidden for a single changed symbol")
+	}
+
+	// Sampled (large changed set) attribution must be flagged honestly.
+	r.RiskAttributionExact = false
+	if !strings.Contains(renderMarkdown(r, nil, nil), "(approximate)") {
+		t.Errorf("sampled attribution must be labeled approximate:\n%s", renderMarkdown(r, nil, nil))
+	}
+}
