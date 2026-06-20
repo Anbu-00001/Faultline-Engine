@@ -33,3 +33,7 @@ target/
 
 # Local agent worktrees
 .claude/
+
+# Python
+__pycache__/
+*.pyc

@@ -1,0 +1,215 @@
+{
+  "project": "tornado",
+  "results": [
+    {
+      "bug": "1",
+      "status": "ok",
+      "changed": [
+        "set_nodelay"
+      ],
+      "impacted": 0,
+      "untested": 0,
+      "min_test_set": 0,
+      "minset_names": [],
+      "untested_names": [],
+      "max_depth": 0,
+      "gate": false
+    },
+    {
+      "bug": "2",
+      "status": "ok",
+      "changed": [
+        "write_headers"
+      ],
+      "impacted": 0,
+      "untested": 0,
+      "min_test_set": 0,
+      "minset_names": [],
+      "untested_names": [],
+      "max_depth": 0,
+      "gate": false
+    },
+    {
+      "bug": "3",
+      "status": "ok",
+      "changed": [
+        "close"
+      ],
+      "impacted": 0,
+      "untested": 0,
+      "min_test_set": 0,
+      "minset_names": [],
+      "untested_names": [],
+      "max_depth": 0,
+      "gate": false
+    },
+    {
+      "bug": "4",
+      "status": "ok",
+      "changed": [
+        "get"
+      ],
+      "impacted": 1,
+      "untested": 0,
+      "min_test_set": 0,
+      "minset_names": [],
+      "untested_names": [],
+      "max_depth": 1,
+      "gate": false
+    },
+    {
+      "bug": "5",
+      "status": "ok",
+      "changed": [
+        "_update_next"
+      ],
+      "impacted": 3,
+      "untested": 2,
+      "min_test_set": 1,
+      "minset_names": [
+        "_schedule_next"
+      ],
+      "untested_names": [
+        "_run",
+        "_schedule_next"
+      ],
+      "max_depth": 2,
+      "gate": true
+    },
+    {
+      "bug": "6",
+      "status": "no-existing-symbol-changed",
+      "changed": [],
+      "impacted": 0,
+      "untested": 0,
+      "gate": false
+    },
+    {
+      "bug": "7",
+      "status": "ok",
+      "changed": [
+        "run_in_executor"
+      ],
+      "impacted": 0,
+      "untested": 0,
+      "min_test_set": 0,
+      "minset_names": [],
+      "untested_names": [],
+      "max_depth": 0,
+      "gate": false
+    },
+    {
+      "bug": "8",
+      "status": "no-existing-symbol-changed",
+      "changed": [],
+      "impacted": 0,
+      "untested": 0,
+      "gate": false
+    },
+    {
+      "bug": "9",
+      "status": "no-existing-symbol-changed",
+      "changed": [],
+      "impacted": 0,
+      "untested": 0,
+      "gate": false
+    },
+    {
+      "bug": "10",
+      "status": "no-existing-symbol-changed",
+      "changed": [],
+      "impacted": 0,
+      "untested": 0,
+      "gate": false
+    },
+    {
+      "bug": "11",
+      "status": "ok",
+      "changed": [
+        "_read_body"
+      ],
+      "impacted": 2,
+      "untested": 1,
+      "min_test_set": 1,
+      "minset_names": [
+        "_read_message"
+      ],
+      "untested_names": [
+        "_read_message"
+      ],
+      "max_depth": 2,
+      "gate": true
+    },
+    {
+      "bug": "12",
+      "status": "ok",
+      "changed": [
+        "_on_access_token",
+        "facebook_request"
+      ],
+      "impacted": 1,
+      "untested": 0,
+      "min_test_set": 0,
+      "minset_names": [],
+      "untested_names": [],
+      "max_depth": 1,
+      "gate": false
+    },
+    {
+      "bug": "13",
+      "status": "ok",
+      "changed": [
+        "_can_keep_alive"
+      ],
+      "impacted": 2,
+      "untested": 1,
+      "min_test_set": 1,
+      "minset_names": [
+        "_read_message"
+      ],
+      "untested_names": [
+        "_read_message"
+      ],
+      "max_depth": 2,
+      "gate": true
+    },
+    {
+      "bug": "14",
+      "status": "ok",
+      "changed": [
+        "initialize"
+      ],
+      "impacted": 0,
+      "untested": 0,
+      "min_test_set": 0,
+      "minset_names": [],
+      "untested_names": [],
+      "max_depth": 0,
+      "gate": false
+    },
+    {
+      "bug": "15",
+      "status": "ok",
+      "changed": [
+        "validate_absolute_path"
+      ],
+      "impacted": 2,
+      "untested": 0,
+      "min_test_set": 0,
+      "minset_names": [],
+      "untested_names": [],
+      "max_depth": 2,
+      "gate": false
+    },
+    {
+      "bug": "16",
+      "status": "no-existing-symbol-changed",
+      "changed": [],
+      "impacted": 0,
+      "untested": 0,
+      "gate": false
+    }
+  ],
+  "fired": 3,
+  "analyzable": 11
+}

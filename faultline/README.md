@@ -45,6 +45,12 @@ Beyond flagging the gap, Faultline **prescribes the fix**:
 
 Both are deterministic pure functions of the graph — no model in the compute path.
 
+## Would it catch real bugs?
+
+We ran Faultline against real, reproduced regressions from [BugsInPy](https://github.com/soarsmu/BugsInPy) (a benchmark of 501 real Python bugs). Treating each fix as a merge request: **on 21 of 32 analyzable real regressions (across `tornado` + `black`), changing the buggy symbol reaches untested code — the gate would have fired and named the minimal test to add.** For example, a one-character `black` tokenizer fix (`_partially_consume_prefix`) silently reaches **5 untested functions up the parse stack**; Faultline prescribes **one** test (`parse_tokens`) to gate them all.
+
+The batch reuses the *exact* `faultline-engine` binary and the same coverage heuristic as the live gate — only the graph source differs (a conservative static analyzer offline vs. Orbit in production), so the numbers are a **lower bound**. Full methodology, honest caveats, verified call chains, and a reproducible script: **[empirical/RESULTS.md](empirical/RESULTS.md)**.
+
 ## Architecture
 
 | Component | Role | Tests |

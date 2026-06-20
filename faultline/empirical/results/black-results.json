@@ -1,0 +1,471 @@
+{
+  "project": "black",
+  "results": [
+    {
+      "bug": "1",
+      "status": "ok",
+      "changed": [
+        "reformat_many",
+        "schedule_formatting"
+      ],
+      "impacted": 2,
+      "untested": 1,
+      "min_test_set": 0,
+      "minset_names": [],
+      "untested_names": [
+        "patched_main"
+      ],
+      "max_depth": 2,
+      "gate": true
+    },
+    {
+      "bug": "2",
+      "status": "ok",
+      "changed": [
+        "generate_ignored_nodes"
+      ],
+      "impacted": 10,
+      "untested": 5,
+      "min_test_set": 1,
+      "minset_names": [
+        "convert_one_fmt_off_pair"
+      ],
+      "untested_names": [
+        "convert_one_fmt_off_pair",
+        "format_stdin_to_stdout",
+        "normalize_fmt_off",
+        "patched_main",
+        "reformat_one"
+      ],
+      "max_depth": 6,
+      "gate": true
+    },
+    {
+      "bug": "3",
+      "status": "no-existing-symbol-changed",
+      "changed": [],
+      "impacted": 0,
+      "untested": 0,
+      "gate": false
+    },
+    {
+      "bug": "4",
+      "status": "ok",
+      "changed": [
+        "maybe_empty_lines"
+      ],
+      "impacted": 0,
+      "untested": 0,
+      "min_test_set": 0,
+      "minset_names": [],
+      "untested_names": [],
+      "max_depth": 0,
+      "gate": false
+    },
+    {
+      "bug": "5",
+      "status": "ok",
+      "changed": [
+        "bracket_split_build_line",
+        "maybe_remove_trailing_comma"
+      ],
+      "impacted": 11,
+      "untested": 10,
+      "min_test_set": 2,
+      "minset_names": [
+        "left_hand_split",
+        "right_hand_split"
+      ],
+      "untested_names": [
+        "add_whitespace",
+        "append_safe",
+        "compat",
+        "generate_tokens",
+        "left_hand_split",
+        "rhs",
+        "right_hand_split",
+        "tokenize",
+        "tokenize_loop",
+        "untokenize"
+      ],
+      "max_depth": 4,
+      "gate": true
+    },
+    {
+      "bug": "6",
+      "status": "ok",
+      "changed": [
+        "__init__",
+        "generate_tokens",
+        "get_grammars",
+        "lib2to3_parse",
+        "parse_stream_raw",
+        "parse_string"
+      ],
+      "impacted": 13,
+      "untested": 7,
+      "min_test_set": 2,
+      "minset_names": [
+        "parse_stream",
+        "tokenize_loop"
+      ],
+      "untested_names": [
+        "format_stdin_to_stdout",
+        "parse_file",
+        "parse_stream",
+        "patched_main",
+        "reformat_one",
+        "tokenize",
+        "tokenize_loop"
+      ],
+      "max_depth": 4,
+      "gate": true
+    },
+    {
+      "bug": "7",
+      "status": "ok",
+      "changed": [
+        "normalize_invisible_parens"
+      ],
+      "impacted": 1,
+      "untested": 1,
+      "min_test_set": 1,
+      "minset_names": [
+        "visit_stmt"
+      ],
+      "untested_names": [
+        "visit_stmt"
+      ],
+      "max_depth": 1,
+      "gate": true
+    },
+    {
+      "bug": "8",
+      "status": "ok",
+      "changed": [
+        "bracket_split_build_line"
+      ],
+      "impacted": 3,
+      "untested": 3,
+      "min_test_set": 2,
+      "minset_names": [
+        "left_hand_split",
+        "right_hand_split"
+      ],
+      "untested_names": [
+        "left_hand_split",
+        "rhs",
+        "right_hand_split"
+      ],
+      "max_depth": 2,
+      "gate": true
+    },
+    {
+      "bug": "9",
+      "status": "ok",
+      "changed": [
+        "get_grammars"
+      ],
+      "impacted": 10,
+      "untested": 3,
+      "min_test_set": 0,
+      "minset_names": [],
+      "untested_names": [
+        "format_stdin_to_stdout",
+        "patched_main",
+        "reformat_one"
+      ],
+      "max_depth": 7,
+      "gate": true
+    },
+    {
+      "bug": "10",
+      "status": "ok",
+      "changed": [
+        "_partially_consume_prefix"
+      ],
+      "impacted": 5,
+      "untested": 5,
+      "min_test_set": 1,
+      "minset_names": [
+        "parse_tokens"
+      ],
+      "untested_names": [
+        "parse_file",
+        "parse_stream",
+        "parse_stream_raw",
+        "parse_string",
+        "parse_tokens"
+      ],
+      "max_depth": 4,
+      "gate": true
+    },
+    {
+      "bug": "11",
+      "status": "ok",
+      "changed": [
+        "split_line"
+      ],
+      "impacted": 8,
+      "untested": 3,
+      "min_test_set": 0,
+      "minset_names": [],
+      "untested_names": [
+        "format_stdin_to_stdout",
+        "patched_main",
+        "reformat_one"
+      ],
+      "max_depth": 6,
+      "gate": true
+    },
+    {
+      "bug": "12",
+      "status": "ok",
+      "changed": [
+        "maybe_decrement_after_for_loop_variable",
+        "maybe_decrement_after_lambda_arguments",
+        "maybe_increment_for_loop_variable",
+        "maybe_increment_lambda_arguments"
+      ],
+      "impacted": 1,
+      "untested": 1,
+      "min_test_set": 1,
+      "minset_names": [
+        "mark"
+      ],
+      "untested_names": [
+        "mark"
+      ],
+      "max_depth": 1,
+      "gate": true
+    },
+    {
+      "bug": "13",
+      "status": "ok",
+      "changed": [
+        "generate_tokens"
+      ],
+      "impacted": 2,
+      "untested": 2,
+      "min_test_set": 1,
+      "minset_names": [
+        "tokenize_loop"
+      ],
+      "untested_names": [
+        "tokenize",
+        "tokenize_loop"
+      ],
+      "max_depth": 2,
+      "gate": true
+    },
+    {
+      "bug": "14",
+      "status": "ok",
+      "changed": [
+        "get_future_imports"
+      ],
+      "impacted": 7,
+      "untested": 2,
+      "min_test_set": 0,
+      "minset_names": [],
+      "untested_names": [
+        "format_stdin_to_stdout",
+        "reformat_one"
+      ],
+      "max_depth": 5,
+      "gate": true
+    },
+    {
+      "bug": "15",
+      "status": "ok",
+      "changed": [
+        "__init__",
+        "__str__",
+        "append",
+        "append_comment",
+        "generate_comments",
+        "generate_ignored_nodes",
+        "hide_fmt_off",
+        "leaf_from_consumed",
+        "line",
+        "maybe_empty_lines",
+        "maybe_increment_for_loop_variable",
+        "maybe_remove_trailing_comma",
+        "normalize_fmt_off",
+        "show",
+        "split_line",
+        "trim_prefix",
+        "visit",
+        "visit_default",
+        "visit_unformatted"
+      ],
+      "impacted": 16,
+      "untested": 11,
+      "min_test_set": 9,
+      "minset_names": [
+        "visit_DEDENT",
+        "visit_ENDMARKER",
+        "visit_INDENT",
+        "visit_SEMI",
+        "visit_async_stmt",
+        "visit_decorators",
+        "visit_simple_stmt",
+        "visit_stmt",
+        "visit_suite"
+      ],
+      "untested_names": [
+        "format_stdin_to_stdout",
+        "reformat_one",
+        "visit_DEDENT",
+        "visit_ENDMARKER",
+        "visit_INDENT",
+        "visit_SEMI",
+        "visit_async_stmt",
+        "visit_decorators",
+        "visit_simple_stmt",
+        "visit_stmt",
+        "visit_suite"
+      ],
+      "max_depth": 5,
+      "gate": true
+    },
+    {
+      "bug": "16",
+      "status": "ok",
+      "changed": [
+        "gen_python_files_in_dir"
+      ],
+      "impacted": 1,
+      "untested": 0,
+      "min_test_set": 0,
+      "minset_names": [],
+      "untested_names": [],
+      "max_depth": 1,
+      "gate": false
+    },
+    {
+      "bug": "17",
+      "status": "ok",
+      "changed": [
+        "lib2to3_parse"
+      ],
+      "impacted": 8,
+      "untested": 1,
+      "min_test_set": 0,
+      "minset_names": [],
+      "untested_names": [
+        "reformat_one"
+      ],
+      "max_depth": 5,
+      "gate": true
+    },
+    {
+      "bug": "18",
+      "status": "ok",
+      "changed": [
+        "format_file_in_place",
+        "format_stdin_to_stdout",
+        "lib2to3_parse"
+      ],
+      "impacted": 6,
+      "untested": 1,
+      "min_test_set": 1,
+      "minset_names": [
+        "reformat_one"
+      ],
+      "untested_names": [
+        "reformat_one"
+      ],
+      "max_depth": 2,
+      "gate": true
+    },
+    {
+      "bug": "19",
+      "status": "no-existing-symbol-changed",
+      "changed": [],
+      "impacted": 0,
+      "untested": 0,
+      "gate": false
+    },
+    {
+      "bug": "20",
+      "status": "ok",
+      "changed": [
+        "format_file_in_place"
+      ],
+      "impacted": 2,
+      "untested": 1,
+      "min_test_set": 1,
+      "minset_names": [
+        "reformat_one"
+      ],
+      "untested_names": [
+        "reformat_one"
+      ],
+      "max_depth": 2,
+      "gate": true
+    },
+    {
+      "bug": "21",
+      "status": "ok",
+      "changed": [
+        "dump_to_file"
+      ],
+      "impacted": 6,
+      "untested": 0,
+      "min_test_set": 0,
+      "minset_names": [],
+      "untested_names": [],
+      "max_depth": 4,
+      "gate": false
+    },
+    {
+      "bug": "22",
+      "status": "ok",
+      "changed": [
+        "__str__",
+        "append",
+        "append_comment",
+        "delimiter_split",
+        "is_comment",
+        "last_non_delimiter",
+        "left_hand_split",
+        "maybe_adapt_standalone_comment",
+        "maybe_remove_trailing_comma",
+        "right_hand_split",
+        "split_line"
+      ],
+      "impacted": 6,
+      "untested": 1,
+      "min_test_set": 0,
+      "minset_names": [],
+      "untested_names": [
+        "format_file_contents"
+      ],
+      "max_depth": 4,
+      "gate": true
+    },
+    {
+      "bug": "23",
+      "status": "ok",
+      "changed": [
+        "assert_equivalent",
+        "coroutine",
+        "lib2to3_parse"
+      ],
+      "impacted": 6,
+      "untested": 1,
+      "min_test_set": 1,
+      "minset_names": [
+        "format_file_contents"
+      ],
+      "untested_names": [
+        "format_file_contents"
+      ],
+      "max_depth": 3,
+      "gate": true
+    }
+  ],
+  "fired": 18,
+  "analyzable": 21
+}

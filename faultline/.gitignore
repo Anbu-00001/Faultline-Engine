@@ -3,3 +3,7 @@
 *.log
 .faultline_token
 pat_*.json
+
+# Python
+__pycache__/
+*.pyc
