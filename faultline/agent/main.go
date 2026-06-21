@@ -40,10 +40,12 @@ type orbitNode struct {
 	Name           string `json:"name"`
 	FilePath       string `json:"file_path"`
 	DefinitionType string `json:"definition_type"`
-	// StartLine is best-effort: populated only by the optional linesQuery (some
-	// Orbit versions expose it on Definition nodes) and used solely to place Code
-	// Quality findings on the exact line. Absent ⇒ findings fall back to line 1.
+	// StartLine/EndLine are best-effort: populated only by the optional linesQuery
+	// (some Orbit versions expose them on Definition nodes). StartLine places Code
+	// Quality findings on the exact line (absent ⇒ line 1); the [StartLine,EndLine]
+	// range maps execution coverage onto a definition (absent ⇒ name heuristic).
 	StartLine int `json:"start_line"`
+	EndLine   int `json:"end_line"`
 }
 
 type orbitEdge struct {
@@ -857,12 +859,13 @@ func extendsQuery(pid, limit int) string {
 	return fmt.Sprintf(`{"query":{"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","columns":["name","file_path","definition_type"],"filters":{"project_id":{"op":"eq","value":%d}}},{"id":"b","entity":"Definition","columns":["name","file_path","definition_type"]}],"relationships":[{"type":"EXTENDS","from":"a","to":"b","min_hops":1,"max_hops":1,"direction":"outgoing"}],"limit":%d},"response_format":"raw"}`, pid, limit)
 }
 
-// linesQuery is a best-effort fetch of Definition start lines, used only to place
-// Code Quality findings precisely. It is requested separately (not folded into
-// defsQuery) so that an Orbit version which does not expose `start_line` fails
-// only THIS query — the core analysis is untouched and findings degrade to line 1.
+// linesQuery is a best-effort fetch of Definition line ranges, used to place Code
+// Quality findings precisely and to map execution coverage onto definitions. It is
+// requested separately (not folded into defsQuery) so that an Orbit version which
+// does not expose these columns fails only THIS query — the core analysis is
+// untouched, findings degrade to line 1, and coverage degrades to the name heuristic.
 func linesQuery(pid, limit int) string {
-	return fmt.Sprintf(`{"query":{"query_type":"traversal","node":{"id":"d","entity":"Definition","columns":["start_line"],"filters":{"project_id":{"op":"eq","value":%d}}},"limit":%d},"response_format":"raw"}`, pid, limit)
+	return fmt.Sprintf(`{"query":{"query_type":"traversal","node":{"id":"d","entity":"Definition","columns":["start_line","end_line"],"filters":{"project_id":{"op":"eq","value":%d}}},"limit":%d},"response_format":"raw"}`, pid, limit)
 }
 
 func splitNonEmpty(s string) []string {
@@ -897,6 +900,10 @@ func main() {
 	gateUntested := flag.Int("gate-untested", -1, "if >=0, exit non-zero when untested-impacted count exceeds N (gates the MR)")
 	htmlOut := flag.String("html-out", "", "optional path to write a self-contained interactive blast-radius graph (HTML)")
 	codeQualityOut := flag.String("codequality-out", "", "optional path to write a GitLab Code Quality report (e.g. gl-code-quality-report.json) of the untested impacted functions")
+	coveragePath := flag.String("coverage", "", "optional Cobertura XML or lcov coverage report; real execution coverage replaces the name heuristic where line ranges are known")
+	draft := flag.String("draft", "", "set to 'true' (e.g. $CI_MERGE_REQUEST_DRAFT) to run advisory-only and never block a draft MR")
+	mrLabels := flag.String("mr-labels", "", "comma-separated MR labels (e.g. $CI_MERGE_REQUEST_LABELS); the 'faultline-override' label turns the gate into an audited advisory")
+	overrideReason := flag.String("override-reason", "", "reason recorded in the verdict when the faultline-override label is applied")
 	flag.Parse()
 
 	if *pid == 0 || *enginePath == "" {
@@ -954,14 +961,49 @@ func main() {
 	data, _ := json.MarshalIndent(g, "", "  ")
 	fatal(os.WriteFile(graphPath, data, 0o644))
 
-	// Coverage (read once): definitions whose name appears in a test file. Passed to
-	// the engine as tested checkpoints for the minimum-test-set cut, and reused below
-	// for the untested blast radius.
+	// Coverage of impacted symbols, in order of confidence:
+	//   1. a real execution-coverage report (--coverage, Cobertura/lcov), mapped onto
+	//      each definition by its Orbit line range; falling back per-definition to
+	//   2. a name-reference scan of the checked-out repo's test files (--repo-root).
 	corpus := ""
 	if *repoRoot != "" {
 		corpus = readTestCorpus(*repoRoot)
 	}
-	testedIDs := coveredDefIDs(g.Nodes, corpus)
+
+	// Best-effort line ranges (one query): used to place Code Quality findings and to
+	// map execution coverage onto definitions. Fetched only when something needs them.
+	lineByID := map[string]int{}
+	lineRange := map[string][2]int{}
+	if *codeQualityOut != "" || *coveragePath != "" {
+		if lr, lerr := query(linesQuery(*pid, limit)); lerr == nil {
+			for _, n := range lr.Result.Nodes {
+				if n.StartLine > 0 {
+					lineByID[n.ID] = n.StartLine
+					if n.EndLine >= n.StartLine {
+						lineRange[n.ID] = [2]int{n.StartLine, n.EndLine}
+					}
+				}
+			}
+		} else {
+			fmt.Fprintf(os.Stderr, "faultline-agent: line ranges unavailable (Code Quality at line 1, coverage via name heuristic): %v\n", lerr)
+		}
+	}
+
+	var cov lineCoverage
+	if *coveragePath != "" {
+		c, cerr := parseCoverage(*coveragePath)
+		if cerr != nil {
+			fmt.Fprintf(os.Stderr, "faultline-agent: coverage report ignored (%v); falling back to the name heuristic\n", cerr)
+		} else {
+			cov = c
+		}
+	}
+
+	testedIDs := resolveTested(g.Nodes, lineRange, cov, corpus)
+	testedSet := map[string]bool{}
+	for _, id := range testedIDs {
+		testedSet[id] = true
+	}
 
 	engineOut, err := exec.Command(*enginePath, "--graph", graphPath,
 		"--changed", strings.Join(changed, ","),
@@ -996,32 +1038,39 @@ func main() {
 		}
 	}
 
-	// Untested blast radius: which transitively-impacted symbols no test covers.
+	// Untested blast radius: impacted symbols with no covering test — from the
+	// coverage report when provided, else the name heuristic (unchanged path).
 	var untested []impacted
-	if *repoRoot != "" {
+	switch {
+	case cov != nil:
+		for _, b := range rep.BlastRadius {
+			if b.Name == "" {
+				continue // unresolved nodes can't be shown by name
+			}
+			if !testedSet[b.ID] {
+				untested = append(untested, b)
+			}
+		}
+	case *repoRoot != "":
 		untested = untestedImpact(rep.BlastRadius, corpus)
 	}
 
-	// Will this verdict actually fail the pipeline? (Drives the ⛔/⚠️ badge.)
-	blocking := *gateUntested >= 0 && len(untested) > *gateUntested
-	md := renderMarkdown(rep, changedNames, untested, blocking)
+	// Apply the gate plus the adoption-comfort escapes (draft MR / audited override).
+	// `block` drives both the ⛔/⚠️ badge and the final exit code.
+	block, advisoryReason := gateDecision(*gateUntested, len(untested),
+		strings.EqualFold(strings.TrimSpace(*draft), "true"),
+		splitNonEmpty(*mrLabels), *overrideReason)
+	md := renderMarkdown(rep, changedNames, untested, block)
+	if advisoryReason != "" {
+		md += "\n" + advisoryReason + "\n"
+	}
 	md += hubNotes(g, changed, hubFanInThreshold())
 
 	// Native GitLab surface: a Code Quality report so each untested impacted function
 	// shows in the MR Reports tab (Free tier) — and inline on the diff (Ultimate). It
 	// is advisory; Code Quality never blocks a merge on its own (the gate below does).
 	if *codeQualityOut != "" {
-		lineByID := map[string]int{}
-		if lr, lerr := query(linesQuery(*pid, limit)); lerr == nil {
-			for _, n := range lr.Result.Nodes {
-				if n.StartLine > 0 {
-					lineByID[n.ID] = n.StartLine
-				}
-			}
-		} else {
-			fmt.Fprintf(os.Stderr, "faultline-agent: start_line unavailable, Code Quality findings placed at line 1: %v\n", lerr)
-		}
-		cq, cerr := buildCodeQuality(untested, rep.MinimumTestSet, rep.CoverageRanking, blocking, lineByID)
+		cq, cerr := buildCodeQuality(untested, rep.MinimumTestSet, rep.CoverageRanking, block, lineByID)
 		fatal(cerr)
 		fatal(os.WriteFile(*codeQualityOut, cq, 0o644))
 		fmt.Fprintf(os.Stderr, "faultline-agent: wrote Code Quality report (%d finding(s)) to %s\n", len(untested), *codeQualityOut)
@@ -1081,11 +1130,17 @@ func main() {
 
 	// Deterministic gate: fail the pipeline (block the MR) when too many
 	// transitively-impacted symbols are untested. This is what makes Faultline a
-	// governance GATE, not just a comment.
-	if *gateUntested >= 0 && len(untested) > *gateUntested {
+	// governance GATE, not just a comment. A draft MR or the audited override label
+	// suppresses the block (see gateDecision) — but it is still reported, never silent.
+	if block {
 		fmt.Fprintf(os.Stderr,
 			"faultline-agent: GATE FAILED — %d untested impacted definition(s) exceed threshold %d\n",
 			len(untested), *gateUntested)
 		os.Exit(1)
+	}
+	if advisoryReason != "" {
+		fmt.Fprintf(os.Stderr,
+			"faultline-agent: gate suppressed (advisory) — %d untested impacted definition(s); see verdict for the recorded reason\n",
+			len(untested))
 	}
 }

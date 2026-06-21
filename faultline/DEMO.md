@@ -67,6 +67,11 @@ open-source, built on GitLab Orbit."* Show the repo URL + MIT.
 
 ---
 
+## Optional beats (use if time allows — they land "native" + "honest")
+- **Native surface (≈5s):** flash the MR **Reports** tab showing the Code Quality findings (every untested impacted function, on the Free tier) — Faultline feels like part of GitLab, not a bolted-on bot.
+- **Real coverage (1 line of VO):** *"Point it at your existing coverage report and it uses real execution data — the name match is just the fallback."*
+- **Adoption comfort (1 line):** *"Draft MRs are advisory; an override label is an audited bypass — nothing is blocked, or skipped, silently."*
+
 ## On-screen checklist (don't get dinged)
 - Show a **live** Orbit query / the gate running in a real pipeline (not mocked).
 - Keep the **voiceover jargon-free**; the words "vertex cut" / "Shapley" stay on screen

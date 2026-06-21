@@ -34,11 +34,19 @@ faultline-gate:
       export GITLAB_TOKEN="$FAULTLINE_TOKEN"
       CHANGED=$(curl -s -H "Authorization: Bearer $FAULTLINE_TOKEN" "$CI_API_V4_URL/projects/$CI_PROJECT_ID/merge_requests/$CI_MERGE_REQUEST_IID/changes" | jq -r '.changes[].new_path' | paste -sd, -)
       echo "Faultline: changed files = $CHANGED"
+      # Optional REAL coverage: point FAULTLINE_COVERAGE at a Cobertura/lcov report your
+      # test job produced (pass it to this job via needs:[{job, artifacts:true}]). When
+      # unset, Faultline falls back to its name-reference coverage heuristic.
+      COV_FLAG=""
+      if [ -n "$FAULTLINE_COVERAGE" ] && [ -f "$FAULTLINE_COVERAGE" ]; then COV_FLAG="--coverage $FAULTLINE_COVERAGE"; fi
+      # Draft MRs run advisory-only; the 'faultline-override' label is an audited bypass.
       faultline-agent --mode rest --project-id "$CI_PROJECT_ID" --changed-files "$CHANGED" \
         --engine /tmp/faultline/engine/target/release/faultline-engine \
         --repo-root "$CI_PROJECT_DIR" --post-mr "$CI_MERGE_REQUEST_IID" \
         --html-out "$CI_PROJECT_DIR/faultline-graph.html" \
         --codequality-out "$CI_PROJECT_DIR/gl-code-quality-report.json" \
+        --draft "$CI_MERGE_REQUEST_DRAFT" --mr-labels "$CI_MERGE_REQUEST_LABELS" \
+        $COV_FLAG \
         --gate-untested "${FAULTLINE_GATE:--1}"
   # Two surfaces survive a gate failure (when:always):
   #  - the interactive blast-radius graph, exposed in the MR widget ("View exposed

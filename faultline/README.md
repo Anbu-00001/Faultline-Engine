@@ -4,7 +4,13 @@
 
 > Orbit can *describe* a change's blast radius. **Faultline makes Orbit *enforce* it** — Code Owners for the blast radius, not the diff.
 
-**75 deterministic tests** · Rust engine: 31 example + **3 property tests proving the closure is complete, the minimum test set is provably minimal, and the Shapley risk split is exact** · Go agent: 41 · **polyglot (Go + Python + Ruby) + CODEOWNERS governance + Duo closed loop + native Code Quality report** · runs as a GitLab CI gate · [why it's correct →](CORRECTNESS.md)
+**89 deterministic tests** · Rust engine: 31 example + **3 property tests proving the closure is complete, the minimum test set is provably minimal, and the Shapley risk split is exact** · Go agent: 55 · **polyglot (Go + Python + Ruby) + real coverage (Cobertura/lcov) + CODEOWNERS governance + Duo closed loop + native Code Quality report** · runs as a GitLab CI gate · [why it's correct →](CORRECTNESS.md)
+
+> ### 👩‍⚖️ Judges start here
+> 1. **Watch it block a real change** → [a live MR that raises a tax rate by one line and fails the pipeline](https://gitlab.com/anbuchelvanganesan.cse2024-group/faultline-demo/-/merge_requests/1) — the verdict names the untested code 5 calls deep and the one test to add.
+> 2. **3-minute demo video** → _<!-- VIDEO_URL -->_ — cold-opens on the red pipeline, then shows the live `max_hops:4 → compile_error` proof that Orbit's own query **cannot** do this.
+> 3. **Convince yourself it's real** → [why it's a *new* Orbit capability (3-hop cap, proven live)](#why-this-is-a-new-capability-for-orbit) · [why every number is correct](CORRECTNESS.md) · [caught **21 of 32** real BugsInPy regressions](empirical/RESULTS.md).
+> 4. **Adopt it** → one `include:` in `.gitlab-ci.yml` ([below](#install-one-ci-job)); also published to the **AI Catalog**.
 
 Faultline computes the **full transitive set of callers** ("blast radius") of the symbols changed in a merge request, intersects it with the impacted code that **lacks test coverage**, and **fails the pipeline (blocks the merge)** when an untested blast radius is found. A green-looking one-line helper change that silently reaches deep, untested code becomes a *blocked* MR with an explained verdict — written in plain language ("*Changing `parseConfig` could affect 6 functions; 3 have no tests; add 1 test at `parse_tokens` to cover them all*"), with the graph theory tucked into an expandable section for reviewers who want it.
 
@@ -56,6 +62,7 @@ Beyond flagging the gap, Faultline **prescribes the fix**:
 - **Untested-risk attribution** — an **exact Shapley value** per changed symbol ("which change owns the gap": `parseConfig` owns 66%, `loadEnv` 34%). Overlapping blast radii are split fairly, not double-counted; the shares sum to the true untested total (efficiency axiom), verified against the textbook permutation definition.
 - **Code owners beyond the diff** — Faultline reads the project's real **CODEOWNERS** file and maps it onto the *blast radius*, surfacing owners of impacted-but-unchanged files that GitLab's diff-only Code Owners approval would never pull in. *Code Owners for the blast radius, not the diff* — the literal promise, enforced (last-match precedence, sections, and the gitignore glob subset, all tested).
 - **Native GitLab surface** — Faultline also emits a **Code Quality report** in the exact format GitLab ingests, so every untested impacted function appears in the merge request's **Reports** tab on the **Free** tier (and inline on the diff on Ultimate), each with a stable per-symbol fingerprint so re-runs don't re-nag. Severity is derived from the algorithm — a *recommended test point* (a member of the provably-minimal set) outranks a node that is merely impacted — never a guessed threshold. It is **advisory** (Code Quality never blocks a merge on its own); the deterministic gate does the blocking.
+- **Real coverage, not just names** — point Faultline at your existing **Cobertura or lcov** report (`FAULTLINE_COVERAGE`) and an impacted function is judged *tested* only when a line inside its body actually executed in the test suite (mapped via the definition's Orbit line range). It falls back to a name-reference heuristic only where execution data is missing — answering the most common objection to impact gates ("your coverage signal is approximate").
 - **Closed loop with GitLab Duo** — the minimum test set is the exact goal to hand to an agent, so the verdict @-mentions a Duo flow (GitLab's documented trigger) to open a **draft** MR adding that test; a human still approves and the gate never auto-merges. See **[CLOSED_LOOP.md](CLOSED_LOOP.md)**.
 
 The first three are deterministic pure functions of the graph — no model in the compute path; the fourth hands off to a model but only to *draft*, never to decide.
@@ -82,7 +89,7 @@ This is proven, not asserted:
 | Component | Role | Tests |
 |---|---|---|
 | **Rust engine** (`engine/`) | Pure, deterministic BFS over reverse-`CALLS`/`EXTENDS` edges → the complete transitive caller set with shortest-caller distances (`O(V+E)`, cycle-safe), **plus the provably-minimal minimum test set (min vertex cut), the per-node coverage ranking (dominance), and exact Shapley untested-risk attribution**. | 34 |
-| **Go agent** (`agent/`) | Pulls Definitions + 1-hop `CALLS`/`EXTENDS` edges from Orbit (`POST /api/v4/orbit/query`), normalizes, runs the engine, scans the checked-out repo for tests of impacted symbols, renders the **plain-language** verdict (blast radius, minimum test set, coverage ranking, Shapley attribution, **CODEOWNERS owners beyond the diff**, **Duo closed-loop hand-off**) with the math behind progressive disclosure + a de-cluttered mermaid + a self-contained interactive HTML graph, **emits a native GitLab Code Quality report** for the MR Reports tab, posts the verdict to the MR, and exits non-zero to gate. | 41 |
+| **Go agent** (`agent/`) | Pulls Definitions + 1-hop `CALLS`/`EXTENDS` edges from Orbit (`POST /api/v4/orbit/query`), normalizes, runs the engine, scans the checked-out repo for tests of impacted symbols, renders the **plain-language** verdict (blast radius, minimum test set, coverage ranking, Shapley attribution, **CODEOWNERS owners beyond the diff**, **Duo closed-loop hand-off**) with the math behind progressive disclosure + a de-cluttered mermaid + a self-contained interactive HTML graph, **emits a native GitLab Code Quality report** for the MR Reports tab, posts the verdict to the MR, and exits non-zero to gate. | 55 |
 
 Runs as a GitLab CI job on `merge_request_event`. A companion **declarative GitLab Duo agent** (`agents/faultline-impact-reviewer.yml`) is published to the **AI Catalog** as the always-on, in-platform front door (see `CATALOG.md`).
 
@@ -112,18 +119,21 @@ The job pulls the call graph from Orbit for the MR's changed files, computes the
 | `FAULTLINE_HTTP_TIMEOUT_SEC` | `30` | Per-request timeout for Orbit/GitLab calls. |
 | `FAULTLINE_DUO_FLOW` | unset | Duo flow service-account handle to @-mention for the closed-loop test hand-off (see [CLOSED_LOOP.md](CLOSED_LOOP.md)). Unset → the hand-off renders as guidance, never a fake mention. |
 | `FAULTLINE_HUB_FANIN` | `10` | Flag a changed symbol as a high-blast-radius "hub" when it has at least this many direct callers. `0` disables the alert. |
+| `FAULTLINE_COVERAGE` | unset | Path to a **Cobertura XML or lcov** report your test job produced (pass it to the gate job via `needs:[{job, artifacts: true}]`). Real execution coverage then replaces the name heuristic for any definition whose line range is known; unmatched definitions fall back to the heuristic. |
+
+Two **adoption-comfort** behaviors need no configuration: a **draft MR** runs advisory-only (the gate enforces once it is marked Ready), and applying the **`faultline-override`** label turns the gate into an *audited* advisory — the bypass and its reason are recorded in the posted verdict, so nothing is skipped silently.
 
 ## Run the tests
 
 ```console
 $ (cd engine && cargo test)   # 34 passed (incl. 3 property tests + language-blind closure) — closure, min-cut, coverage, Shapley
-$ (cd agent  && go test ./...) # 41 passed — normalize, render, gate, mermaid, interactive graph, polyglot E2E, CODEOWNERS governance, Duo hand-off, Code Quality report
+$ (cd agent  && go test ./...) # 55 passed — normalize, render, gate, mermaid, interactive graph, polyglot E2E, CODEOWNERS governance, Duo hand-off, Code Quality report, coverage (Cobertura/lcov), gate comfort (draft/override)
 ```
 
 ## Honesty boundaries (by design)
 
 - **Orbit indexes the default branch.** Faultline traces callers of *modified existing* symbols; a brand-new symbol that exists only on the branch correctly shows an empty radius (not a false alarm).
-- **Coverage is a conservative name-reference heuristic** (word-boundary match in test files), not execution coverage. It errs toward flagging. Ingesting `lcov`/`cobertura` is the planned next step.
+- **Coverage: real execution data when you provide it, a conservative heuristic otherwise.** Point `FAULTLINE_COVERAGE` at a Cobertura/lcov report and a definition is judged tested only if a line in its range actually executed; without a report (or for a definition whose file/line range isn't in it) Faultline falls back to a name-reference heuristic (word-boundary match in test files). Both err toward flagging — a shaky path match is treated as *undecided*, never as a false "safe".
 - **Cross-domain (the honest version):** Orbit's `OWNER` edge is `User→Group` only and security findings store file location as a property, not an edge — so Faultline does **not** fake a security→code or owner→code *graph join*. For ownership it instead reads the project's real **CODEOWNERS** file (a separate, first-class GitLab mechanism) and maps it onto the blast radius — a clearly-labeled property-level join, not an invented Orbit edge. Security/deploy joins stay out of scope rather than overclaimed.
 
 ## License
