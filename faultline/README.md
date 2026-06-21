@@ -28,6 +28,21 @@ Faultline computes the **full transitive set of callers** ("blast radius") of th
 
 Change-impact and test-impact analysis aren't new — Microsoft's Test Impact Analysis, CodeScene, Sourcegraph, and prior hackathon entries all do versions of it. Faultline's defensible edge is the **bundle**: (1) genuine depth **past Orbit's 3-hop cap** (verifiable), (2) outputs that are **deterministic and provable** — minimum test set, exact attribution — with **no model in the decision path**, (3) **empirical proof** on real bugs (below), and (4) **radical honesty** — it refuses the cross-domain graph joins Orbit's schema can't support, and states its own soundness boundary. A tool whose pitch is "the AI figures it out" structurally can't make claims (1)–(4).
 
+### vs. other Orbit blast-radius agents
+
+Blast-radius-on-Orbit is the most crowded lane in this hackathon — and several entries are deterministic and open-source, so *that* isn't the difference. The difference is **depth, optimality, and what happens after the diagnosis**:
+
+| | **Faultline** | Comment-only reviewers | 3-hop gates |
+|---|---|---|---|
+| **Reach** | full reverse-transitive **closure, any depth** (demo: 5 hops) | Orbit `query_graph`, no client-side closure | reverse-`CALLS` **≤ 3 hops** (self-described "lower bound") |
+| **Action** | **blocks** the merge on *untested* impact | posts an MR comment, never blocks | blocks, but on impact alone |
+| **The fix** | **provably-minimal** test set (min vertex cut, brute-force-checked) | — | **greedy** set-cover (not fewest) |
+| **Attribution** | **exact Shapley** per changed symbol | — | — |
+| **Languages** | **Go · Python · Ruby** (language-blind engine) | unspecified | **Python only** |
+| **Coverage** | **real Cobertura/lcov** (name fallback) | name / none | name / none |
+
+Others stop at Orbit's query and either *comment* or *gate on impact*. Faultline closes the graph **past the 3-hop cap** and gates on the part that matters — **untested** impact — then hands you the **fewest** tests that clear it.
+
 ---
 
 ## Why this is a *new* capability for Orbit
@@ -139,7 +154,7 @@ $ (cd agent  && go test ./...) # 57 passed — normalize, render, gate, mermaid,
 
 - **Orbit indexes the default branch.** Faultline traces callers of *modified existing* symbols; a brand-new symbol that exists only on the branch correctly shows an empty radius (not a false alarm).
 - **Coverage: real execution data when you provide it, a conservative heuristic otherwise.** Point `FAULTLINE_COVERAGE` at a Cobertura/lcov report and a definition is judged tested only if a line in its range actually executed; without a report (or for a definition whose file/line range isn't in it) Faultline falls back to a name-reference heuristic (word-boundary match in test files). Both err toward flagging — a shaky path match is treated as *undecided*, never as a false "safe".
-- **Cross-domain (the honest version):** Orbit's `OWNER` edge is `User→Group` only and security findings store file location as a property, not an edge — so Faultline does **not** fake a security→code or owner→code *graph join*. For ownership it instead reads the project's real **CODEOWNERS** file (a separate, first-class GitLab mechanism) and maps it onto the blast radius — a clearly-labeled property-level join, not an invented Orbit edge. Security/deploy joins stay out of scope rather than overclaimed.
+- **Cross-domain (the honest version):** Orbit's `OWNER` edge is `User→Group` only and security findings store file location as a property, not an edge — so Faultline does **not** fake a security→code or owner→code *graph join*. For ownership it instead reads the project's real **CODEOWNERS** file (a separate, first-class GitLab mechanism) and maps it onto the blast radius — a clearly-labeled property-level join, not an invented Orbit edge. A project-wide *count* of findings or owners is a **correlation, not change-impact** — Orbit has no Finding→code or User→code edge to make it one — so Faultline refuses to present one as the other. It would be easy, and wrong. Security/deploy joins stay out of scope rather than overclaimed.
 
 ## License
 

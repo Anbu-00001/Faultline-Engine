@@ -5,7 +5,7 @@
 A deterministic GitLab CI merge gate, built on **GitLab Orbit** (the code Knowledge Graph), that computes the *full transitive* set of callers of the symbols a merge request changes, finds the impacted code with **no test coverage**, and **blocks the merge** — with a plain-language verdict and the single smallest test to add.
 
 - **Try it live:** [an MR that raises a tax rate by one line and fails the pipeline](https://gitlab.com/anbuchelvanganesan.cse2024-group/faultline-demo/-/merge_requests/1)
-- **Code (MIT):** the repository this writeup ships in · **89 deterministic tests**
+- **Code (MIT):** the repository this writeup ships in · **91 deterministic tests**
 - **Video:** _<!-- VIDEO_URL -->_
 
 ---
@@ -30,6 +30,12 @@ max_hops: 3 → HTTP 200.  max_hops: 4 → {"code":"compile_error",
 ```
 
 So Orbit can *describe* a path; it **cannot hand you the complete transitive caller set at arbitrary depth** — which is exactly what governance needs. Faultline adds that: a deterministic engine that *closes the graph Orbit exposes*, over `CALLS` **and** `EXTENDS` (so a base-type change ripples through its whole subtype chain).
+
+---
+
+## How it compares to other Orbit blast-radius agents
+
+Blast-radius-on-Orbit is the most crowded lane in this hackathon, and the good entries are deterministic and open-source — so "deterministic" isn't the differentiator. Three things are. **Depth:** the others query Orbit directly (`query_graph`) or walk `CALLS` ≤ 3 hops — one even ships its number as an explicit *"lower bound"* — whereas Faultline pulls the edges and *closes the graph client-side*, surfacing impact at any depth (the demo reaches 5 hops, past Orbit's cap). **Prescription:** the comment-only reviewers stop at a risk verdict, and the gate that does block uses a *greedy* set-cover test list; Faultline gates on **untested** impact and computes the **provably-minimal** test set (a min vertex cut, machine-checked against brute force) plus **exact Shapley** attribution per changed symbol. **Reach across a real stack:** the others are effectively Python-only; Faultline's engine is language-blind, proven on **Go + Python + Ruby**, with real Cobertura/lcov coverage. Same shape of tool, taken further — not "here's the blast radius," but "here's the smallest set of tests that closes the *untested* part of it, across your languages, deeper than any single Orbit query can see."
 
 ---
 
