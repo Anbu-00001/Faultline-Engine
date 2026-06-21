@@ -157,11 +157,14 @@ reads as *correct*, not broken:
   therefore traces callers of *modified existing* symbols; a symbol that exists only
   on the MR's source branch correctly shows an empty radius (it has no indexed
   callers yet) rather than a false alarm.
-- **Coverage is a conservative name-reference heuristic.** "Untested" means an
-  impacted symbol's name does not appear (word-boundary match) in any test file —
-  not execution coverage. It errs toward flagging. Ingesting `lcov`/`cobertura` is
-  the planned next step. The minimum test set is therefore *provably minimal with
-  respect to this coverage signal* — the math is exact; its input is a heuristic.
+- **Coverage: real execution data when provided, else a conservative name heuristic.**
+  When a `cobertura`/`lcov` report is supplied (`FAULTLINE_COVERAGE`), "untested" means
+  an impacted symbol's executed line range has no covered lines — real execution
+  coverage, mapped onto the symbol via Orbit's best-effort `start_line`/`end_line`. With
+  no report it falls back to a name-reference heuristic: the symbol's name does not
+  appear (word-boundary match) in any test file. Both err toward flagging. The minimum
+  test set is therefore *provably minimal with respect to the coverage signal in use* —
+  the math is exact; the fallback's input is a heuristic.
 - **Attribution is exact for ≤ 20 changed symbols.** Beyond that the Shapley value is
   estimated by deterministic permutation sampling and the verdict is explicitly marked
   *approximate* (`risk_attribution_exact: false`) — never a falsely-exact number.

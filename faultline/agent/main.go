@@ -202,7 +202,16 @@ func normalize(defs orbitResp, edgeResps ...orbitResp) graph {
 
 // resolveChanged turns explicit Definition IDs and/or changed file paths into a
 // deduped set of changed Definition IDs. Pure function.
-func resolveChanged(g graph, changedDefs, changedFiles []string) []string {
+//
+// When changedLines (base-branch line numbers per file, from the MR diff) and
+// lineRange (each definition's Orbit [start,end]) are both available for a file,
+// resolution is LINE-PRECISE: a definition counts as changed only when one of its
+// lines was actually touched — so a one-line edit names that one symbol, not every
+// symbol in the file. The degradations are all the safe direction (never drop real
+// impact): a file with no line data falls back to file granularity (every symbol),
+// and a definition whose range is unknown is included rather than silently dropped.
+// Iteration is over g.Nodes so the result order is deterministic.
+func resolveChanged(g graph, changedDefs, changedFiles []string, changedLines map[string][]int, lineRange map[string][2]int) []string {
 	seen := map[string]bool{}
 	var out []string
 	add := func(id string) {
@@ -220,12 +229,105 @@ func resolveChanged(g graph, changedDefs, changedFiles []string) []string {
 			want[f] = true
 		}
 		for _, n := range g.Nodes {
-			if want[n.FilePath] {
-				add(n.ID)
+			if !want[n.FilePath] {
+				continue
+			}
+			lines := changedLines[n.FilePath]
+			if len(lines) == 0 {
+				add(n.ID) // no diff line data for this file → file granularity
+				continue
+			}
+			rng, ok := lineRange[n.ID]
+			if !ok {
+				add(n.ID) // can't place this symbol → conservatively include it
+				continue
+			}
+			for _, L := range lines {
+				if L >= rng[0] && L <= rng[1] {
+					add(n.ID)
+					break
+				}
 			}
 		}
 	}
 	return out
+}
+
+// hunkOldStart pulls the old-side (base-branch) starting line from a unified-diff
+// hunk header, e.g. "@@ -10,7 +10,7 @@ func f() {" → 10.
+var hunkOldStart = regexp.MustCompile(`^@@ -(\d+)`)
+
+// parseChangedLines extracts the old-side (base-branch) line numbers a unified diff
+// touched, as GitLab returns it in a merge-request change's "diff" field (which
+// begins at the first "@@" — there is no ---/+++ header). Only removed/modified
+// lines have an old-side position, so a pure-addition hunk yields none; callers then
+// fall back to file granularity. Orbit's start_line/end_line are on the same base
+// branch, so these numbers line up with definition ranges.
+func parseChangedLines(diff string) []int {
+	var out []int
+	bline := 0
+	for _, line := range strings.Split(diff, "\n") {
+		switch {
+		case strings.HasPrefix(line, "@@"):
+			if m := hunkOldStart.FindStringSubmatch(line); m != nil {
+				bline, _ = strconv.Atoi(m[1])
+			}
+		case strings.HasPrefix(line, "-"):
+			out = append(out, bline)
+			bline++
+		case strings.HasPrefix(line, "+"):
+			// an inserted line has no base-branch position; don't advance the counter
+		default:
+			bline++ // context line (including blank " " lines) advances the old side
+		}
+	}
+	return out
+}
+
+// mrChangedLines fetches a merge request's per-file diffs and returns, per file path,
+// the base-branch line numbers the diff touched — used to refine the changed-symbol
+// set from file granularity to the exact definitions edited. Best-effort: any failure
+// returns an error and the caller keeps the file-level behavior.
+func mrChangedLines(host, token string, projectID, mrIID int) (map[string][]int, error) {
+	endpoint := fmt.Sprintf("https://%s/api/v4/projects/%d/merge_requests/%d/changes", host, projectID, mrIID)
+	req, err := http.NewRequest("GET", endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	data, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("MR changes GET HTTP %d: %s", resp.StatusCode, truncate(string(data), 200))
+	}
+	var payload struct {
+		Changes []struct {
+			OldPath string `json:"old_path"`
+			NewPath string `json:"new_path"`
+			Diff    string `json:"diff"`
+		} `json:"changes"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return nil, err
+	}
+	out := map[string][]int{}
+	for _, c := range payload.Changes {
+		lines := parseChangedLines(c.Diff)
+		if len(lines) == 0 {
+			continue
+		}
+		// Orbit keys definitions by their base-branch path; key both paths so a rename
+		// still lines up with the indexed file.
+		out[c.NewPath] = append(out[c.NewPath], lines...)
+		if c.OldPath != "" && c.OldPath != c.NewPath {
+			out[c.OldPath] = append(out[c.OldPath], lines...)
+		}
+	}
+	return out, nil
 }
 
 // mdCell sanitizes text for a Markdown TABLE cell. GitLab's table parser splits
@@ -946,7 +1048,47 @@ func main() {
 	}
 
 	g := normalize(defs, calls, extends)
-	changed := resolveChanged(g, splitNonEmpty(*changedDefs), splitNonEmpty(*changedFiles))
+
+	// Line-precise changed-symbol resolution (best-effort): when we can read the MR
+	// diff, restrict each changed file to the definitions whose Orbit line range a
+	// changed line falls in, instead of flagging every symbol in the file. Falls back
+	// to file granularity wherever diff or line data is missing.
+	changedFileList := splitNonEmpty(*changedFiles)
+	var changedLines map[string][]int
+	if *postMR > 0 && len(changedFileList) > 0 {
+		proj := *mrProject
+		if proj == 0 {
+			proj = *pid
+		}
+		if token := orbitToken(); token != "" {
+			if cl, lerr := mrChangedLines(*host, token, proj, *postMR); lerr != nil {
+				fmt.Fprintf(os.Stderr, "faultline-agent: MR diff unavailable, using file-level changed set: %v\n", lerr)
+			} else {
+				changedLines = cl
+			}
+		}
+	}
+
+	// Best-effort line ranges (one query): used to refine the changed set above, to
+	// place Code Quality findings, and to map execution coverage onto definitions.
+	lineByID := map[string]int{}
+	lineRange := map[string][2]int{}
+	if *codeQualityOut != "" || *coveragePath != "" || len(changedLines) > 0 {
+		if lr, lerr := query(linesQuery(*pid, limit)); lerr == nil {
+			for _, n := range lr.Result.Nodes {
+				if n.StartLine > 0 {
+					lineByID[n.ID] = n.StartLine
+					if n.EndLine >= n.StartLine {
+						lineRange[n.ID] = [2]int{n.StartLine, n.EndLine}
+					}
+				}
+			}
+		} else {
+			fmt.Fprintf(os.Stderr, "faultline-agent: line ranges unavailable (Code Quality at line 1, coverage via name heuristic): %v\n", lerr)
+		}
+	}
+
+	changed := resolveChanged(g, splitNonEmpty(*changedDefs), changedFileList, changedLines, lineRange)
 	if len(changed) == 0 {
 		fatal(fmt.Errorf("no changed definitions resolved (project may be unindexed, or files have no definitions)"))
 	}
@@ -968,25 +1110,6 @@ func main() {
 	corpus := ""
 	if *repoRoot != "" {
 		corpus = readTestCorpus(*repoRoot)
-	}
-
-	// Best-effort line ranges (one query): used to place Code Quality findings and to
-	// map execution coverage onto definitions. Fetched only when something needs them.
-	lineByID := map[string]int{}
-	lineRange := map[string][2]int{}
-	if *codeQualityOut != "" || *coveragePath != "" {
-		if lr, lerr := query(linesQuery(*pid, limit)); lerr == nil {
-			for _, n := range lr.Result.Nodes {
-				if n.StartLine > 0 {
-					lineByID[n.ID] = n.StartLine
-					if n.EndLine >= n.StartLine {
-						lineRange[n.ID] = [2]int{n.StartLine, n.EndLine}
-					}
-				}
-			}
-		} else {
-			fmt.Fprintf(os.Stderr, "faultline-agent: line ranges unavailable (Code Quality at line 1, coverage via name heuristic): %v\n", lerr)
-		}
 	}
 
 	var cov lineCoverage

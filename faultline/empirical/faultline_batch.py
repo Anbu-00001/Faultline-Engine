@@ -11,10 +11,13 @@ i.e. whether the change's transitive blast radius included untested code.
 Honest scope (see RESULTS.md): the offline batch uses a stdlib `ast` static analyzer
 as the CALLS source; the live GitLab gate uses Orbit for the same edges. The engine —
 the part that computes the transitive closure, the untested gate, the minimum test set
-and the Shapley attribution — is byte-for-byte identical in both. Static call
-resolution is name-based, so it OVER-approximates callers (the safe direction for a
-gate: it never silently drops impact). No bug result is asserted; every number is
-computed by the engine.
+and the Shapley attribution — is byte-for-byte identical in both. Call resolution is
+scope-aware and emits an edge only when the target is unambiguous (see build_graph), so
+it UNDER-approximates: ambiguous dynamic dispatch is dropped rather than over-connecting
+the graph through shared method names. The reported blast radius is therefore a
+conservative lower bound — real impact can only be larger, which makes the empirical
+fire-rate a floor, not a ceiling. No bug result is asserted; every number is computed
+by the engine.
 
 Dependencies: Python 3.8+ stdlib only. Requires a built faultline-engine and local
 clones of BugsInPy and the target project (paths passed as args).

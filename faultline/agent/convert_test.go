@@ -48,18 +48,92 @@ func TestResolveChanged(t *testing.T) {
 		{ID: "T", FilePath: "calc/order.go"},
 	}}
 
-	if got := resolveChanged(g, nil, []string{"calc/tax.go"}); len(got) != 2 {
+	// No line data → file granularity (every symbol in the file), as before.
+	if got := resolveChanged(g, nil, []string{"calc/tax.go"}, nil, nil); len(got) != 2 {
 		t.Fatalf("by-file: want 2 defs in tax.go, got %d (%v)", len(got), got)
 	}
-	if got := resolveChanged(g, []string{"A", "A"}, nil); len(got) != 1 || got[0] != "A" {
+	if got := resolveChanged(g, []string{"A", "A"}, nil, nil, nil); len(got) != 1 || got[0] != "A" {
 		t.Fatalf("by-id dedup: want [A], got %v", got)
 	}
-	if got := resolveChanged(g, nil, []string{"missing.go"}); len(got) != 0 {
+	if got := resolveChanged(g, nil, []string{"missing.go"}, nil, nil); len(got) != 0 {
 		t.Fatalf("unknown file: want 0, got %v", got)
 	}
 	// union of ids + files, deduped (A appears in both)
-	if got := resolveChanged(g, []string{"A"}, []string{"calc/order.go"}); len(got) != 2 {
+	if got := resolveChanged(g, []string{"A"}, []string{"calc/order.go"}, nil, nil); len(got) != 2 {
 		t.Fatalf("union: want 2 (A + T), got %d (%v)", len(got), got)
+	}
+}
+
+func TestResolveChangedLinePrecise(t *testing.T) {
+	// Mirrors the demo's calc/tax.go layout.
+	g := graph{Nodes: []gNode{
+		{ID: "CalculateTax", Name: "CalculateTax", FilePath: "calc/tax.go"},
+		{ID: "applyRate", Name: "applyRate", FilePath: "calc/tax.go"},
+		{ID: "standardRate", Name: "standardRate", FilePath: "calc/tax.go"},
+		{ID: "ApplyDiscount", Name: "ApplyDiscount", FilePath: "calc/tax.go"},
+	}}
+	lineRange := map[string][2]int{
+		"CalculateTax":  {4, 6},
+		"applyRate":     {8, 10},
+		"standardRate":  {12, 14},
+		"ApplyDiscount": {18, 20},
+	}
+
+	// A change on line 13 falls only inside standardRate → just that symbol.
+	got := resolveChanged(g, nil, []string{"calc/tax.go"},
+		map[string][]int{"calc/tax.go": {13}}, lineRange)
+	if len(got) != 1 || got[0] != "standardRate" {
+		t.Fatalf("line-precise: want [standardRate], got %v", got)
+	}
+
+	// A change spanning two functions' ranges names both, in graph order.
+	got = resolveChanged(g, nil, []string{"calc/tax.go"},
+		map[string][]int{"calc/tax.go": {9, 19}}, lineRange)
+	if len(got) != 2 || got[0] != "applyRate" || got[1] != "ApplyDiscount" {
+		t.Fatalf("multi-line: want [applyRate ApplyDiscount], got %v", got)
+	}
+
+	// A changed line outside every known range matches nothing in that file.
+	got = resolveChanged(g, nil, []string{"calc/tax.go"},
+		map[string][]int{"calc/tax.go": {1}}, lineRange)
+	if len(got) != 0 {
+		t.Fatalf("between-defs change: want 0, got %v", got)
+	}
+
+	// A definition whose range we don't know is conservatively included (never dropped).
+	partial := map[string][2]int{"standardRate": {12, 14}} // others unknown
+	got = resolveChanged(g, nil, []string{"calc/tax.go"},
+		map[string][]int{"calc/tax.go": {13}}, partial)
+	want := map[string]bool{"standardRate": true, "CalculateTax": true, "applyRate": true, "ApplyDiscount": true}
+	if len(got) != 4 {
+		t.Fatalf("partial ranges: want all 4 (unplaceable kept), got %v", got)
+	}
+	for _, id := range got {
+		if !want[id] {
+			t.Fatalf("partial ranges: unexpected id %q in %v", id, got)
+		}
+	}
+}
+
+func TestParseChangedLines(t *testing.T) {
+	// The exact diff GitLab returns for the demo's one-line rate change.
+	demo := "@@ -10,7 +10,7 @@ func applyRate(amount, rate float64) float64 {\n" +
+		" }\n \n func standardRate() float64 {\n-\treturn 0.18\n+\treturn 0.20\n }\n \n // ApplyDiscount reduces amount by pct percent."
+	if got := parseChangedLines(demo); len(got) != 1 || got[0] != 13 {
+		t.Fatalf("demo diff: want [13], got %v", got)
+	}
+
+	// Pure-addition hunk has no old-side line → empty (caller falls back to file level).
+	add := "@@ -5,0 +6,2 @@\n+new line one\n+new line two"
+	if got := parseChangedLines(add); len(got) != 0 {
+		t.Fatalf("pure addition: want [], got %v", got)
+	}
+
+	// Two separate hunks, each with a removed line.
+	two := "@@ -3,2 +3,2 @@\n a\n-b\n+B\n@@ -20,2 +20,2 @@\n c\n-d\n+D"
+	got := parseChangedLines(two)
+	if len(got) != 2 || got[0] != 4 || got[1] != 21 {
+		t.Fatalf("two hunks: want [4 21], got %v", got)
 	}
 }
 

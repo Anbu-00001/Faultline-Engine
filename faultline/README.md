@@ -4,7 +4,9 @@
 
 > Orbit can *describe* a change's blast radius. **Faultline makes Orbit *enforce* it** — Code Owners for the blast radius, not the diff.
 
-**89 deterministic tests** · Rust engine: 31 example + **3 property tests proving the closure is complete, the minimum test set is provably minimal, and the Shapley risk split is exact** · Go agent: 55 · **polyglot (Go + Python + Ruby) + real coverage (Cobertura/lcov) + CODEOWNERS governance + Duo closed loop + native Code Quality report** · runs as a GitLab CI gate · [why it's correct →](CORRECTNESS.md)
+**91 deterministic tests** (Rust engine 34 · Go agent 57). Three are *property tests* that prove the blast radius is complete, the minimum test set is provably minimal, and the Shapley risk split is exact — machine-checked against brute-force oracles. [Why every number is correct →](CORRECTNESS.md)
+
+Polyglot (Go · Python · Ruby) — one verdict, many languages · real coverage (Cobertura/lcov) · CODEOWNERS beyond the diff · native GitLab Code Quality report · Duo closed loop · runs as one GitLab CI gate.
 
 > ### 👩‍⚖️ Judges start here
 > 1. **Watch it block a real change** → [a live MR that raises a tax rate by one line and fails the pipeline](https://gitlab.com/anbuchelvanganesan.cse2024-group/faultline-demo/-/merge_requests/1) — the verdict names the untested code 5 calls deep and the one test to add.
@@ -46,13 +48,15 @@ It closes over **`EXTENDS` edges too** (inheritance / interface implementation /
 
 ## What it does — live
 
-On [a real MR that raises a tax rate by one line](https://gitlab.com/anbuchelvanganesan.cse2024-group/faultline-demo/-/merge_requests/1), Faultline posts this verdict and **fails the pipeline**:
+On [a real MR that raises a tax rate by one line](https://gitlab.com/anbuchelvanganesan.cse2024-group/faultline-demo/-/merge_requests/1), Faultline maps that one changed line to the single symbol it edits (`standardRate`), posts this verdict, and **fails the pipeline**:
 
-> ⚠️ **6 definition(s) transitively affected** — max depth **5**, beyond Orbit's 3-hop query cap.
+> ## 🪨 Faultline · ⛔ Blocked
 >
-> **🔭 Orbit 3-hop query vs Faultline closure** — a native reverse-`CALLS` query reaches at most **4 of 6** impacted definitions; the other **2** (`netLevy` @4 hops, `InvoiceTotal` @5 hops) are invisible to *any* single Orbit query. Faultline computes the full closure.
+> Changing `standardRate` could affect **7** other function(s) — up to **5** call(s) away, past Orbit's 3-call query limit. **5** of them have **no test**.
 >
-> 🚦 **Untested blast radius — 5 impacted definitions with no test coverage** → **GATE FAILED, merge blocked.**
+> 👉 **Fastest fix:** add **1** test — at `Rate` — to cover the whole change.
+>
+> **🔭 Orbit 3-hop query vs Faultline closure** — a native reverse-`CALLS` query reaches at most **5 of 7** impacted definitions; the other **2** (`netLevy` @4 hops, `InvoiceTotal` @5 hops) sit beyond *any* single Orbit query. Faultline computes the full closure → **GATE FAILED, merge blocked.**
 
 It also renders a **mermaid** diagram of the blast subgraph (changed = blue, untested = red) inline in the note, plus a **self-contained interactive graph** (HTML, zero dependencies — no D3/CDN) delivered as a CI artifact link in the MR: zoom, pan, drag nodes, and hover any definition for its file and hop-distance. The force-directed layout is computed *deterministically in Go*, so the same change yields a byte-identical page — it opens in any browser offline, or renders inline if GitLab Pages is enabled.
 
@@ -90,7 +94,7 @@ This is proven, not asserted:
 | Component | Role | Tests |
 |---|---|---|
 | **Rust engine** (`engine/`) | Pure, deterministic BFS over reverse-`CALLS`/`EXTENDS` edges → the complete transitive caller set with shortest-caller distances (`O(V+E)`, cycle-safe), **plus the provably-minimal minimum test set (min vertex cut), the per-node coverage ranking (dominance), and exact Shapley untested-risk attribution**. | 34 |
-| **Go agent** (`agent/`) | Pulls Definitions + 1-hop `CALLS`/`EXTENDS` edges from Orbit (`POST /api/v4/orbit/query`), normalizes, runs the engine, scans the checked-out repo for tests of impacted symbols, renders the **plain-language** verdict (blast radius, minimum test set, coverage ranking, Shapley attribution, **CODEOWNERS owners beyond the diff**, **Duo closed-loop hand-off**) with the math behind progressive disclosure + a de-cluttered mermaid + a self-contained interactive HTML graph, **emits a native GitLab Code Quality report** for the MR Reports tab, posts the verdict to the MR, and exits non-zero to gate. | 55 |
+| **Go agent** (`agent/`) | Pulls Definitions + 1-hop `CALLS`/`EXTENDS` edges from Orbit (`POST /api/v4/orbit/query`), normalizes, runs the engine, scans the checked-out repo for tests of impacted symbols, renders the **plain-language** verdict (blast radius, minimum test set, coverage ranking, Shapley attribution, **CODEOWNERS owners beyond the diff**, **Duo closed-loop hand-off**) with the math behind progressive disclosure + a de-cluttered mermaid + a self-contained interactive HTML graph, **emits a native GitLab Code Quality report** for the MR Reports tab, posts the verdict to the MR, and exits non-zero to gate. Maps the MR's changed *lines* to the exact definitions edited (via Orbit line ranges), so a one-line fix names one symbol — not the whole file. | 57 |
 
 Runs as a GitLab CI job on `merge_request_event`. A companion **declarative GitLab Duo agent** (`agents/faultline-impact-reviewer.yml`) is published to the **AI Catalog** as the always-on, in-platform front door (see `CATALOG.md`).
 
@@ -128,7 +132,7 @@ Two **adoption-comfort** behaviors need no configuration: a **draft MR** runs ad
 
 ```console
 $ (cd engine && cargo test)   # 34 passed (incl. 3 property tests + language-blind closure) — closure, min-cut, coverage, Shapley
-$ (cd agent  && go test ./...) # 55 passed — normalize, render, gate, mermaid, interactive graph, polyglot E2E, CODEOWNERS governance, Duo hand-off, Code Quality report, coverage (Cobertura/lcov), gate comfort (draft/override)
+$ (cd agent  && go test ./...) # 57 passed — normalize, render, gate, mermaid, interactive graph, polyglot E2E, CODEOWNERS governance, Duo hand-off, Code Quality report, coverage (Cobertura/lcov), gate comfort (draft/override), line-precise changed set
 ```
 
 ## Honesty boundaries (by design)
