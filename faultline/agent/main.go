@@ -806,7 +806,7 @@ func detailsBlock(r report, untested []impacted) string {
 }
 
 func faultlineFooter() string {
-	return "\n✅ **Deterministic** — the same change always produces the same verdict; there is no AI in the decision.\n" +
+	return "\n✅ **Deterministic — and not a guess.** This is computed from your real call graph in GitLab Orbit (indexed facts, not inference), so the same change always produces the same verdict, with no AI in the decision. \"Could affect\" means a function reaches the change *directly or through a chain of calls*.\n" +
 		"\n<sub>Faultline reads your code's call graph, not its runtime. \"No test\" means no test file refers to the function by name — this errs toward flagging (it won't tell you something is safe when it isn't), and can miss calls made dynamically.</sub>\n"
 }
 
@@ -1063,7 +1063,7 @@ func main() {
 	case "rest":
 		token := orbitToken()
 		if token == "" {
-			fatal(fmt.Errorf("rest mode requires AI_FLOW_GITLAB_TOKEN or GITLAB_TOKEN env var"))
+			fatal(fmt.Errorf("Faultline needs a GitLab API token to read your Orbit graph. In CI: add a masked CI/CD variable FAULTLINE_TOKEN (a token with `api` scope) — see the README \"Install\" section. Locally: export GITLAB_TOKEN. (The agent reads GITLAB_TOKEN / AI_FLOW_GITLAB_TOKEN; the CI include exports FAULTLINE_TOKEN into it.)"))
 		}
 		query = func(body string) (orbitResp, error) { return queryREST(body, *host, token) }
 		idx = fetchIndexHealth(*host, token, *pid)
