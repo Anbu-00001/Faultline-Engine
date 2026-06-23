@@ -168,6 +168,22 @@ func coveredLinesFor(cov lineCoverage, filePath string) (map[int]bool, bool) {
 	return nil, false
 }
 
+// treatUnnameableAsTested adds every node Faultline can't name (empty Name — e.g.
+// Orbit-indexed test functions or anonymous definitions) to the tested set, so the
+// minimum test set never prescribes "add a test at #4729…", which a developer cannot
+// act on. Such nodes are already omitted from the untested list, so this keeps the
+// prescribed cut consistent with what we display: provably minimal over the *nameable*
+// untested sinks. Returns the augmented (deduplicated) testedIDs; mutates testedSet.
+func treatUnnameableAsTested(nodes []gNode, testedIDs []string, testedSet map[string]bool) []string {
+	for _, n := range nodes {
+		if strings.TrimSpace(n.Name) == "" && !testedSet[n.ID] {
+			testedSet[n.ID] = true
+			testedIDs = append(testedIDs, n.ID)
+		}
+	}
+	return testedIDs
+}
+
 // resolveTested decides which definitions are tested. With a coverage report and a
 // definition's line range, a definition is tested iff a line in [start,end] was
 // executed; otherwise it falls back to the name-reference heuristic (`corpus`).

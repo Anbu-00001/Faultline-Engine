@@ -1199,6 +1199,11 @@ func main() {
 	for _, id := range testedIDs {
 		testedSet[id] = true
 	}
+	// Unnameable Orbit nodes (no name in the indexed columns — e.g. test functions
+	// or anonymous definitions) cannot be a prescribed test target, and we already
+	// omit them from the untested list; treat them as free interceptors so the
+	// minimum test set never recommends a node a developer can't act on.
+	testedIDs = treatUnnameableAsTested(g.Nodes, testedIDs, testedSet)
 
 	engineOut, err := exec.Command(*enginePath, "--graph", graphPath,
 		"--changed", strings.Join(changed, ","),

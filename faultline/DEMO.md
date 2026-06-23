@@ -1,27 +1,67 @@
-# Faultline — demo scenario & 3-minute video script
+# Faultline — demo scenario & ≤3-minute video storyboard
 
-The goal of the video (judging weighs it heavily): a **real** developer story on
-**real** code, showing Faultline catch something a normal review would miss — then
-the plain-language fix, the depth past Orbit's cap, and the honesty boundary. No
-slides, no contrived repo, no jargon in the voiceover.
+This is a **read-through, not a guess**: a shot-by-shot storyboard with timings, what's
+on screen, and the exact voiceover for each beat. It is optimized for the four equal
+judging criteria (Technological Implementation · Design & Usability · Potential Impact ·
+Quality of Idea) and for what these GitLab judges have rewarded before: *"agents that
+act, not chatbots"*, *"feels like a product"*, heavy testing, and quantified impact.
+
+**Hard rules (from the host + demo-craft research):** ≤ 3:00 (judges may stop at 3:00,
+so **front-load** everything); upload to YouTube/Vimeo **public**, marked *Not for Kids*;
+no copyrighted music; **state the hackathon name in the first seconds**; screencast +
+voiceover (no talking-head, no slides); the voiceover adds information the screen doesn't
+(never read the screen aloud); jargon (`vertex cut`, `Shapley`) stays **on-screen only**,
+never spoken. Speak slightly fast and edit out dead air.
+
+Every on-screen claim below is **live and re-verifiable** by a judge — no mocks.
 
 ---
 
-## The demo (use a real, reproducible bug)
+## The storyboard (target 2:50, hard cap 3:00)
 
-**Live hero — the public demo MR (this is the on-screen capture).** A one-line change to
-`standardRate` in `calc/tax.go` raises a tax rate. Faultline maps that line to the single
-symbol it edits, then shows the change reaches **7 functions, up to 5 calls away** — including
-`netLevy` (4 hops) and `InvoiceTotal` (5 hops), **past Orbit's 3-hop query cap**. **5 are
-untested**, so the gate **fails the pipeline**, and the verdict prescribes **1 test, at `Rate`,
-to cover the whole change** (the provably-minimal cut). It's public and re-verifiable by a judge:
+| # | Time | On screen | Voiceover (one breath each) | Criteria |
+|---|------|-----------|------------------------------|----------|
+| **0 · Cold open — the result first** | 0:00–0:12 | A real GitLab MR, pipeline **RED**, zoom on the verdict: **⛔ Faultline · Blocked**. Lower-third caption: *"GitLab Transcend Hackathon · Faultline · built on GitLab Orbit."* | "This one-line change just got **blocked from merging** — because it breaks code that nobody tested. Here's the agent that caught it." | Impact · Design |
+| **1 · The stakes** | 0:12–0:30 | Split screen: the tiny diff (one constant in `calc/tax.go`) ↔ a fan-out of impacted functions; badge **"7 impacted · 5 untested."** | "A one-line helper change can ripple across the whole call graph. Review only shows the diff — the blast radius is invisible. Faultline computes it from GitLab Orbit, your code's knowledge graph." | Impact · Idea |
+| **2 · It ACTS (not a chatbot)** | 0:30–0:52 | The pipeline job log: Faultline reads the MR, queries Orbit, posts the verdict. Zoom the plain-language lines. | "It's not a chatbot you ask. It runs as a CI gate, acts on the merge itself, and blocks it — then tells you the **one** test to add: a test at `Rate` covers all five untested paths." | Tech · Impact |
+| **3 · Deterministic** | 0:52–1:10 | Same MR re-run twice, side by side → **byte-identical** verdict. Caption: *"No model in the decision path — same change, same verdict."* | "The decision is deterministic. No model in the loop — so no bias, no flake. The same change always produces the same verdict, and a human can re-run and audit it." | Tech · Idea |
+| **4 · Polyglot, one verdict** | 1:10–1:33 | The polyglot MR: one change in **Go + Python + Ruby**; a single verdict; language badges light up. | "One change touching Go, Python, and Ruby — and **one** blast radius across all three, because the graph is language-blind." | Tech · Idea |
+| **5 · THE WOW — deeper than one Orbit query** | 1:33–2:00 | Live terminal: `max_hops: 4` → **`compile_error`** from Orbit. Then the verdict showing `InvoiceTotal` at **5 hops**. | "Orbit caps a single query at three hops, for speed — push it to four and it refuses. So Faultline pulls the edges and closes the whole graph offline, reaching code five calls deep that no single Orbit query can — and blocks on the part that's untested." | Idea · Tech |
+| **6 · Honest by construction (fail-closed)** | 2:00–2:18 | Run against a project Orbit hasn't finished indexing → **🟡 Faultline · Can't vouch — index incomplete**. | "And when Orbit's index is incomplete, it **won't** give you a false green. It fails closed and says it can't be sure — the same instinct GitLab's own indexer uses." | Idea · Tech |
+| **7 · Dogfood + one-line adoption** | 2:18–2:40 | Faultline gating **its own repo** (advisory ⚠️). Then the install: one `include:` in `.gitlab-ci.yml`; the **AI Catalog** listing. Badge **"110 tests · MIT."** | "It gates its own repo. Adopt it in **one line** of CI, or enable the published Catalog agent. A hundred and ten tests, MIT-licensed." | Design · Tech |
+| **8 · Close** | 2:40–2:50 | Recap card, red→green; tagline. Repo URL + MIT + AI Catalog. | "Faultline: know what your change breaks, get the one test that closes it — and an honest answer when it can't be sure." | Idea · Impact |
+
+**Timing protection (2:50 is tight):** the beats that must survive are **0 (cold open)**,
+**2 (it acts)**, and **5 (the wow)**. If you overrun: merge **6** into **5** as a single
+"honest / fails-closed" montage, and cut **3** to a 4-second caption. Don't add beats.
+
+**Why this order (research-backed):** outcome-first cold open and hackathon name in the
+first seconds (YC / Devpost / MLH); problem → it-acts → wow, fast (AngelHack); "acts, not
+chatbot" answers Veenhof directly; quantified badges echo the "43 tests" praise; the
+`max_hops:4 → compile_error` and fail-closed beats are our unique, fully-demonstrable
+"wow" that separates us from the other blast-radius entries; the one-line install answers
+Design/Usability and "feels like a product."
+
+---
+
+## The hero MR (what beats 0–3, 5 capture) — live & re-verifiable
+
+A one-line change to `standardRate` in `calc/tax.go`. Faultline maps the changed *line*
+to the single symbol it edits, then shows the change reaches **7 functions, up to 5 calls
+away** — including `netLevy` (4 hops) and `InvoiceTotal` (5 hops), **past what one bounded
+Orbit query returns**. **5 are untested**, so the gate **fails the pipeline**, and the
+verdict prescribes **1 test, at `Rate`** (the provably-minimal cut). Public:
 [faultline-demo MR !1](https://gitlab.com/anbuchelvanganesan.cse2024-group/faultline-demo/-/merge_requests/1).
 
-**Empirical evidence (the "would it catch real bugs?" beat) — `black` #10 + BugsInPy.** A
-*one-character* fix to the tokenizer `_partially_consume_prefix` silently reaches **5 untested
-functions up the parse stack**; Faultline prescribes **1 test at `parse_tokens`** to gate them
-all. Across `tornado` + `black`, **21 of 32** analyzable real regressions would have fired the
-gate. Reproduce offline (no GitLab needed):
+Polyglot (beat 4): [faultline-polyglot MR !1](https://gitlab.com/anbuchelvanganesan.cse2024-group/faultline-polyglot/-/merge_requests/1).
+Dogfood (beat 7): [faultline MR !1](https://gitlab.com/anbuchelvanganesan.cse2024-group/faultline/-/merge_requests/1).
+
+## "Would it catch real bugs?" — BugsInPy (a one-line on-screen badge, or a held beat)
+
+A *one-character* fix to `black`'s tokenizer `_partially_consume_prefix` silently reaches
+**5 untested functions** up the parse stack; Faultline prescribes **1 test at
+`parse_tokens`** to gate them all. Across `tornado` + `black`, **21 of 32** analyzable real
+regressions would have fired the gate. Reproduce offline (no GitLab needed):
 
 ```bash
 ( cd engine && cargo build --release )
@@ -31,62 +71,26 @@ python3 empirical/faultline_batch.py --bugsinpy /tmp/BugsInPy --project black \
   --project-src /tmp/black --engine engine/target/release/faultline-engine --bugs 10
 ```
 
-**Polyglot flash (optional, ~5s) — `demo/polyglot/`.** One MR that bumps the base rate in
-`go/rates.go`, `python/rates.py`, and `ruby/rates.rb` at once → one verdict spanning Go +
-Python + Ruby. (See `demo/polyglot/README.md`.)
+## How to film beat 6 (fail-closed) reproducibly
+
+Point the agent at a project Orbit has **not** finished indexing (0 code definitions) —
+it returns the **🟡 Can't vouch** verdict instead of a false ✅:
+
+```bash
+faultline-agent --mode rest --project-id <unindexed-project-id> \
+  --changed-files main.go --engine engine/target/release/faultline-engine --format md
+# → "🟡 Can't vouch — Orbit index incomplete … Faultline will not report this change as safe."
+```
 
 ---
-
-## The script (≤ 2:55, public, no copyrighted music)
-
-> The live screen-capture is the **public demo MR** (re-verifiable by a judge), not a mock.
-> Voiceover stays jargon-free; "vertex cut" / "Shapley" appear only on-screen in the
-> expandable details, never spoken.
-
-**0:00–0:20 — The pain (hook).** *"Alex changes one line in a helper. Tests pass, the MR is
-green, they merge. That night production breaks — in a function three files away that nobody
-in the review opened. Code review only shows the diff; the blast radius is invisible."* (Show
-the one-line diff, then a red production alert.)
-
-**0:20–1:05 — Faultline catches it, live.** Open the real, public demo MR. The pipeline
-**fails**. Read the plain-language verdict on screen: *"Changing `standardRate` could affect
-7 functions — up to 5 calls away, past Orbit's 3-call limit. 5 have no test. Fastest fix:
-add 1 test, at `Rate`, to cover the whole change."* Expand the details once to flash the
-impact graph (blue = changed, red = untested) and the minimum-test-set math — then collapse it.
-
-**1:05–1:45 — Why it goes deeper than anything else (the moat + the field).** *"This isn't a
-guess, and it isn't shallow."* Show the live proof Orbit's own query can't do this:
-`max_hops:4 → compile_error`. *"Orbit answers up to three hops. Other impact agents query it
-directly and report the direct callers, then comment a risk score. Faultline pulls the edges
-and closes the whole graph — so it surfaces `InvoiceTotal`, five calls deep, that no single
-Orbit query can reach — and it doesn't just comment, it **blocks** on the part that's untested."*
-
-**1:45–2:15 — Trustworthy + proven (Technological Implementation).** *"The verdict is computed
-deterministically — same change, same answer, every run, with no model in the decision. And the
-recommended test set is provably the smallest one, machine-checked against brute force across
-107 tests."* Flash BugsInPy: *"On 21 of 32 real, reproduced Python regressions, this gate would
-have fired and named the test to add."*
-
-**2:15–2:40 — Close the loop + honesty.** Show the **GitLab Duo** hand-off — Faultline names the
-exact test, a Duo flow opens a **draft** MR, a human approves. Then the honesty beat: *"It states
-its limits. A project-wide count of findings or owners is a correlation, not impact — so it
-refuses the joins Orbit's graph can't actually support, instead of faking them."*
-
-**2:40–2:55 — Wrap/CTA.** *"Faultline: see the blast radius before you merge — and the one test
-that closes it. Deterministic, open-source, published to the AI Catalog, built on GitLab Orbit."*
-Show the repo URL + MIT + the AI Catalog listing.
-
----
-
-## Optional beats (use if time allows — they land "native" + "honest")
-- **Native surface (≈5s):** flash the MR **Reports** tab showing the Code Quality findings (every untested impacted function, on the Free tier) — Faultline feels like part of GitLab, not a bolted-on bot.
-- **Real coverage (1 line of VO):** *"Point it at your existing coverage report and it uses real execution data — the name match is just the fallback."*
-- **Adoption comfort (1 line):** *"Draft MRs are advisory; an override label is an audited bypass — nothing is blocked, or skipped, silently."*
 
 ## On-screen checklist (don't get dinged)
-- Show a **live** Orbit query / the gate running in a real pipeline (not mocked).
-- Keep the **voiceover jargon-free**; the words "vertex cut" / "Shapley" stay on screen
-  inside the expandable details, never in narration.
+- **State the hackathon name** in the first 5 seconds (lower-third on beat 0).
+- Show a **live** Orbit query / the gate running in a **real** pipeline — never mocked.
+- Keep the **voiceover jargon-free**; `vertex cut` / `Shapley` stay on-screen in the
+  expandable details, never spoken.
 - Show the verdict **in the MR**, where a developer actually works.
-- State one honest limitation out loud (coverage heuristic / dynamic dispatch) — it builds trust.
-- End under 3:00; public link; no copyrighted music.
+- Keep one **honest** beat (6 — fail-closed) out loud; it builds the trust judges reward.
+- **Direct the eye**: zoom/highlight the verdict; don't show full-screen noise.
+- Upload **public**, *Not for Kids*, no copyrighted music, **upload early** (processing
+  can take time). End under **3:00**.

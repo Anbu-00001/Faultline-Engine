@@ -4,7 +4,7 @@
 
 > GitLab built Orbit to answer one question — *"What breaks if I change this service?"* — from **indexed facts, not inference**. Faultline takes that answer the last mile: it doesn't just *describe* a change's blast radius, it **enforces** it. Code Owners for the blast radius, not the diff.
 
-**107 deterministic tests** (Rust engine 34 · Go agent 73). Three are *property tests* that prove the blast radius is complete, the minimum test set is provably minimal, and the Shapley risk split is exact — each machine-checked against a brute-force oracle. And it isn't just green CI: replayed against **BugsInPy**, the gate would have fired on **21 of 32** real Python regressions and named the missing test. [Why every number is correct →](CORRECTNESS.md) · [the BugsInPy run →](empirical/RESULTS.md)
+**110 deterministic tests** (Rust engine 34 · Go agent 76). Three are *property tests* that prove the blast radius is complete, the minimum test set is provably minimal, and the Shapley risk split is exact — each machine-checked against a brute-force oracle. And it isn't just green CI: replayed against **BugsInPy**, the gate would have fired on **21 of 32** real Python regressions and named the missing test. [Why every number is correct →](CORRECTNESS.md) · [the BugsInPy run →](empirical/RESULTS.md)
 
 Polyglot (Go · Python · Ruby) — one verdict, many languages · real coverage (Cobertura/lcov) · CODEOWNERS beyond the diff · native GitLab Code Quality report · Duo closed loop · runs as one GitLab CI gate.
 

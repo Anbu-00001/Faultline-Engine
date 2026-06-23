@@ -7,6 +7,32 @@ import (
 	"testing"
 )
 
+func TestTreatUnnameableAsTested(t *testing.T) {
+	nodes := []gNode{
+		{ID: "1", Name: "Named"},
+		{ID: "2", Name: ""},   // unnameable -> becomes a free interceptor
+		{ID: "3", Name: "  "}, // whitespace-only -> also unnameable
+		{ID: "4", Name: "Already"},
+	}
+	tested := map[string]bool{"4": true}
+	ids := treatUnnameableAsTested(nodes, []string{"4"}, tested)
+	if !tested["2"] || !tested["3"] {
+		t.Fatalf("unnameable nodes must be marked tested, got %v", tested)
+	}
+	if tested["1"] {
+		t.Fatalf("a named node must NOT be auto-marked tested")
+	}
+	n4 := 0
+	for _, id := range ids {
+		if id == "4" {
+			n4++
+		}
+	}
+	if n4 != 1 {
+		t.Fatalf("an already-tested id must not be duplicated, got %d", n4)
+	}
+}
+
 const sampleCobertura = `<?xml version="1.0"?>
 <coverage line-rate="0.5">
  <packages>

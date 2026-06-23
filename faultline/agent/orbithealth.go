@@ -43,13 +43,30 @@ type idxHealth struct {
 func (h idxHealth) degraded() bool { return h.state == idxDegraded }
 
 // orbitStatusResp is the subset of GET /orbit/status we read. Extra fields are
-// ignored. `user.available` is a pointer so an absent field is distinguishable from
-// an explicit false (we only act on an explicit negative).
+// ignored. Orbit has returned the cluster status both at the top level and nested
+// under "system" (the documented shape), so we accept either via clusterStatus().
+// `user.available` is a pointer so an absent field is distinguishable from an explicit
+// false (we only act on an explicit negative).
 type orbitStatusResp struct {
 	Status string `json:"status"`
-	User   *struct {
+	System *struct {
+		Status string `json:"status"`
+	} `json:"system"`
+	User *struct {
 		Available *bool `json:"available"`
 	} `json:"user"`
+}
+
+// clusterStatus returns the reported cluster status from whichever shape Orbit used
+// (top-level or system-nested); "" when neither is present.
+func (s *orbitStatusResp) clusterStatus() string {
+	if s.Status != "" {
+		return s.Status
+	}
+	if s.System != nil {
+		return s.System.Status
+	}
+	return ""
 }
 
 // orbitGraphStatus is the subset of GET /orbit/graph_status we read.
@@ -100,8 +117,8 @@ func assessIndexHealth(gs *orbitGraphStatus, st *orbitStatusResp) idxHealth {
 		if st.User != nil && st.User.Available != nil && !*st.User.Available {
 			return idxHealth{idxDegraded, "Orbit reports the knowledge graph is not available to this token yet"}
 		}
-		if st.Status != "" && !strings.EqualFold(st.Status, "healthy") {
-			return idxHealth{idxDegraded, fmt.Sprintf("Orbit cluster status is %q, not healthy", st.Status)}
+		if cs := st.clusterStatus(); cs != "" && !strings.EqualFold(cs, "healthy") {
+			return idxHealth{idxDegraded, fmt.Sprintf("Orbit cluster status is %q, not healthy", cs)}
 		}
 	}
 

@@ -1,11 +1,12 @@
 # Faultline Impact Reviewer — GitLab Duo declarative agent (AI Catalog)
 #
-# Thin, platform-native companion to the Faultline CI engine. When mentioned or
-# assigned on a merge request, this agent reads the MR diff, traces changed
-# symbols to their callers via repository reads, reasons about transitive
-# downstream and untested impact, and posts a concise Markdown verdict as an
-# MR note. It is DECLARATIVE / server-side ambient: it does NOT execute the
-# Faultline Rust engine or Go agent — those run in the demo project's CI pipeline.
+# Thin, platform-native companion to the Faultline CI engine. Invoked from
+# GitLab Duo Chat on a merge request, this agent reads the MR diff, traces
+# changed symbols to their callers via repository reads, reasons about transitive
+# downstream and untested impact, and posts a concise Markdown verdict as an MR
+# note. It is a DECLARATIVE Duo agent (Chat-invoked, not event-triggered): it
+# does NOT execute the Faultline Rust engine or Go agent — those run in CI, where
+# the precise, unbounded closure over the Orbit graph is computed.
 #
 # Schema: gitlab.com/components/ai-catalog (declarative agent, additionalProperties:false)
 ---
@@ -108,7 +109,7 @@ tools:
   - list_repository_tree
   - grep
 
-public: false
+public: true
 
 # Enablement is handled by the catalog-sync component's `group_id` input
 # (top-level group anbuchelvanganesan.cse2024-group / 134742282) via

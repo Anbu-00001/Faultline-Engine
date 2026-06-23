@@ -81,6 +81,21 @@ func TestAssessIndexHealth_UserNotAvailableIsDegraded(t *testing.T) {
 	}
 }
 
+func TestAssessIndexHealth_NestedSystemStatusUnhealthyIsDegraded(t *testing.T) {
+	// Orbit's documented shape nests status under "system" — it must still be read.
+	h := assessIndexHealth(mustGS(t, gsHealthy), mustStatus(t, `{"user":{"available":true},"system":{"status":"degraded"}}`))
+	if h.state != idxDegraded {
+		t.Fatalf("nested system.status unhealthy must be degraded, got state=%d reason=%q", h.state, h.reason)
+	}
+}
+
+func TestAssessIndexHealth_NestedSystemHealthyStaysOK(t *testing.T) {
+	h := assessIndexHealth(mustGS(t, gsHealthy), mustStatus(t, `{"user":{"available":true},"system":{"status":"healthy"}}`))
+	if h.state != idxOK {
+		t.Fatalf("nested healthy status over a good index must stay OK, got state=%d reason=%q", h.state, h.reason)
+	}
+}
+
 func TestAssessIndexHealth_HealthyStatusDoesNotFlipGoodIndex(t *testing.T) {
 	// A healthy status + available user must NOT turn a populated index into degraded.
 	h := assessIndexHealth(mustGS(t, gsHealthy), mustStatus(t, `{"status":"healthy","user":{"available":true}}`))

@@ -27,7 +27,7 @@ posts a concise Markdown verdict as an MR note.
 | | CI engine (`engine/` + `agent/`) | AI Catalog layer (this) |
 |---|---|---|
 | Runs where | demo project CI pipeline | server-side, ambient |
-| Trigger | pipeline | MR mention / MR event |
+| Trigger | pipeline | GitLab Duo Chat (on an MR) |
 | Compute | Rust closure over Orbit graph | LLM + built-in repo tools |
 | Output | exact transitive blast radius | concise MR note estimate |
 | Runs our binary? | yes | no (declarative only) |
